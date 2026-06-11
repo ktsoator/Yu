@@ -7,12 +7,14 @@ import (
 	"path/filepath"
 
 	"github.com/joho/godotenv"
+	"github.com/ktsoator/yu/weblog"
 )
 
 const (
 	yuDirName      = ".yu"
 	configFileName = "models.yaml"
 	envFileName    = ".env"
+	logDirName     = "logs"
 )
 
 func main() {
@@ -29,6 +31,15 @@ func run(ctx context.Context) error {
 	}
 	_ = godotenv.Load(envPath)
 
+	// Record every model round-trip to ~/.yu/logs for the /logs web viewer.
+	logDir, err := yuPath(logDirName)
+	if err != nil {
+		return err
+	}
+	if err := weblog.Init(logDir); err != nil {
+		return fmt.Errorf("init log dir %s: %w", logDir, err)
+	}
+
 	// Load selectable model profiles up front. API keys are resolved from the
 	// environment later, so ~/.yu/models.yaml can describe providers without secrets.
 	configPath, err := yuPath(configFileName)
@@ -41,11 +52,11 @@ func run(ctx context.Context) error {
 	}
 
 	repl := newREPL(ctx, os.Stdin, models)
-	ag, err := setupAgent(models, repl.scanner)
+	agent, err := setupAgent(models, repl.scanner)
 	if err != nil {
 		return err
 	}
-	return repl.run(ag)
+	return repl.run(agent)
 }
 
 func yuPath(name string) (string, error) {

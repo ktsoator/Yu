@@ -7,30 +7,39 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/ktsoator/yu/agent"
-	"github.com/ktsoator/yu/llm"
+	"github.com/ktsoator/yu/render"
+	"github.com/ktsoator/yu/render/clirender"
+	"github.com/ktsoator/yu/weblog"
 )
 
+// logViewerAddr is the address the /logs web viewer listens on.
+const logViewerAddr = "127.0.0.1:8090"
+
 type repl struct {
-	ctx     context.Context
-	scanner *bufio.Scanner
-	models  []modelConfig
+	ctx        context.Context
+	scanner    *bufio.Scanner
+	models     []modelConfig
+	renderer   func() render.Renderer
+	viewerOnce sync.Once
 }
 
 func newREPL(ctx context.Context, in io.Reader, models []modelConfig) *repl {
 	return &repl{
-		ctx:     ctx,
-		scanner: bufio.NewScanner(in),
-		models:  models,
+		ctx:      ctx,
+		scanner:  bufio.NewScanner(in),
+		models:   models,
+		renderer: func() render.Renderer { return clirender.New() },
 	}
 }
 
 // Main REPL: slash commands are handled locally; normal input goes through
 // the agent and streams chunks back into this terminal callback.
-func (r *repl) run(ag agent.Agent) error {
+func (r *repl) run(agent agent.Agent) error {
 	for {
-		fmt.Print("\nyou › ")
+		fmt.Print("\nYu › ")
 		if !r.scanner.Scan() {
 			break
 		}
@@ -43,14 +52,17 @@ func (r *repl) run(ag agent.Agent) error {
 		case "/exit", "/quit":
 			return nil
 		case "/model":
-			r.switchModel(ag)
+			r.switchModel(agent)
 			continue
 		case "/think":
-			toggleThinking(ag)
+			toggleThinking(agent)
+			continue
+		case "/logs":
+			r.startViewer()
 			continue
 		}
 
-		if err := r.send(ag, input); err != nil {
+		if err := r.send(agent, input); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		}
 	}
@@ -58,6 +70,20 @@ func (r *repl) run(ag agent.Agent) error {
 		return fmt.Errorf("input error: %w", err)
 	}
 	return nil
+}
+
+// startViewer launches the log web viewer once and prints its URL. Subsequent
+// /logs calls just reprint the URL.
+func (r *repl) startViewer() {
+	url := "http://" + logViewerAddr
+	r.viewerOnce.Do(func() {
+		go func() {
+			if err := weblog.Serve(logViewerAddr); err != nil {
+				fmt.Fprintf(os.Stderr, "log viewer: %v\n", err)
+			}
+		}()
+	})
+	fmt.Printf("Log viewer: %s  (logs in %s)\n", url, weblog.Dir())
 }
 
 func (r *repl) switchModel(ag agent.Agent) {
@@ -80,29 +106,15 @@ func toggleThinking(ag agent.Agent) {
 	fmt.Printf("Thinking: %s\n", onOff(ag.Thinking()))
 }
 
-func (r *repl) send(ag agent.Agent, input string) error {
-	// Track the transition from reasoning deltas to final content so the
-	// terminal color is reset exactly once when the answer starts.
-	var inReasoning, inContent bool
-	_, err := ag.Send(r.ctx, input, func(ch llm.Chunk) {
-		if ch.Reasoning != "" {
-			if !inReasoning {
-				fmt.Print("\033[90m[reasoning]\n")
-				inReasoning = true
-			}
-			fmt.Print(ch.Reasoning)
+func (r *repl) send(agent agent.Agent, input string) error {
+	renderer := r.renderer()
+	for ev, err := range agent.Run(r.ctx, input) {
+		if err != nil {
+			renderer.Finish()
+			return err
 		}
-		if ch.Content != "" {
-			if inReasoning && !inContent {
-				fmt.Print("\033[0m\n") // close the gray reasoning block
-			}
-			inContent = true
-			fmt.Print(ch.Content)
-		}
-	})
-	if inReasoning && !inContent {
-		fmt.Print("\033[0m") // reset color when there is reasoning but no content
+		renderer.OnEvent(ev)
 	}
-	fmt.Println()
-	return err
+	renderer.Finish()
+	return nil
 }

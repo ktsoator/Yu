@@ -3,10 +3,13 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"strings"
 
 	"github.com/ktsoator/yu/agent"
 	"github.com/ktsoator/yu/agent/llmagent"
 	"github.com/ktsoator/yu/llm"
+	"github.com/ktsoator/yu/tool"
+	"github.com/ktsoator/yu/tool/fstool"
 )
 
 // setupAgent selects a model and builds the agent.
@@ -24,11 +27,13 @@ func setupAgent(models []modelConfig, scanner *bufio.Scanner) (agent.Agent, erro
 }
 
 func newAgent(model llm.Model) (agent.Agent, error) {
+	tools := []tool.Tool{fstool.NewReadFile(), fstool.NewListDir()}
 	ag, err := llmagent.New(agent.Config{
 		Name:        "yu",
 		Model:       model,
 		Description: "A concise coding assistant in a terminal.",
-		Instruction: "You are a coding assistant in a terminal. Be concise.",
+		Instruction: "You are a coding assistant in a terminal. Be concise. Use the available tools to read files and explore the project when it helps answer the user.",
+		Tools:       tools,
 	})
 	if err != nil {
 		return nil, err
@@ -36,6 +41,15 @@ func newAgent(model llm.Model) (agent.Agent, error) {
 	fmt.Printf("Agent ready\n")
 	fmt.Printf("  Model: %s\n", model.Name())
 	fmt.Printf("  Thinking: %s\n", onOff(ag.Thinking()))
-	fmt.Printf("  Commands: /model, /think, /exit\n")
+	fmt.Printf("  Tools: %s\n", toolNames(tools))
+	fmt.Printf("  Commands: /model, /think, /logs, /exit\n")
 	return ag, nil
+}
+
+func toolNames(tools []tool.Tool) string {
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Name()
+	}
+	return strings.Join(names, ", ")
 }
