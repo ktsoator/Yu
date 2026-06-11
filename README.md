@@ -8,9 +8,9 @@ and can show vendor reasoning deltas when the selected model supports thinking.
 
 ## Configure models
 
-Define the models you can pick from in `~/.yu/models.yaml`. You can start from
-the repository's `models.yaml`. API keys are **not** stored in this file — each
-entry references an environment variable by name via `api_key_env`.
+Define the models you can pick from in `~/.yu/models.yaml`. API keys are **not**
+stored in this file — each entry references an environment variable by name via
+`api_key_env`.
 
 ```yaml
 models:
@@ -66,5 +66,4 @@ agent/agent.go          # agent interface and config
 agent/llmagent/         # LLM-backed agent implementation
 llm/                    # shared model/message abstractions
 llm/openai/             # OpenAI-compatible streaming client
-cmd/probe/              # vendor probing utility for raw streaming chunks
 ```
