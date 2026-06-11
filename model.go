@@ -12,7 +12,7 @@ import (
 func buildModel(mc modelConfig) (llm.Model, error) {
 	apiKey := os.Getenv(mc.APIKeyEnv)
 	if apiKey == "" {
-		return nil, fmt.Errorf("missing API key: set %s in your environment or .env", mc.APIKeyEnv)
+		return nil, fmt.Errorf("missing API key: set %s in your environment or ~/.yu/.env", mc.APIKeyEnv)
 	}
 	return openai.New(openai.Config{
 		APIKey:           apiKey,

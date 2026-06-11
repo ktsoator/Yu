@@ -40,7 +40,7 @@ func loadConfig(path string) ([]modelConfig, error) {
 }
 
 func selectModel(models []modelConfig, scanner *bufio.Scanner) modelConfig {
-	// Empty input selects the first profile, so models.yaml order defines the
+	// Empty input selects the first profile, so model config order defines the
 	// default model.
 	fmt.Println("Select a model:")
 	for i, m := range models {

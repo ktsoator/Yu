@@ -8,9 +8,9 @@ and can show vendor reasoning deltas when the selected model supports thinking.
 
 ## Configure models
 
-Define the models you can pick from in `models.yaml`. API keys are **not** stored
-in this file — each entry references an environment variable by name via
-`api_key_env`, so the file is safe to commit.
+Define the models you can pick from in `~/.yu/models.yaml`. You can start from
+the repository's `models.yaml`. API keys are **not** stored in this file — each
+entry references an environment variable by name via `api_key_env`.
 
 ```yaml
 models:
@@ -32,7 +32,7 @@ models:
 `choices.0.delta.reasoning_content`, but can be set per model if a compatible
 provider streams reasoning text under another raw JSON field.
 
-Put the actual keys in a `.env` file (gitignored):
+Put the actual keys in `~/.yu/.env`:
 
 ```env
 DEEPSEEK_API_KEY=...
@@ -53,14 +53,14 @@ Commands inside the REPL:
 - `/think`: toggle thinking mode for models that support it
 - `/exit` or `/quit`: exit
 
-`models.yaml` is required — Yu exits with an error if it's missing.
+`~/.yu/models.yaml` is required — Yu exits with an error if it's missing.
 
 ## Structure
 
 ```text
 main.go                 # startup wiring
 repl.go                 # terminal REPL and slash commands
-config.go               # models.yaml parsing and model selection
+config.go               # ~/.yu/models.yaml parsing and model selection
 model.go                # OpenAI-compatible model construction
 agent/agent.go          # agent interface and config
 agent/llmagent/         # LLM-backed agent implementation
