@@ -1,0 +1,53 @@
+models:
+  - name: deepseek
+    model: deepseek-v4-flash
+    base_url: &deepseek_url https://api.deepseek.com/v1
+    api_key_env: &deepseek_key DEEPSEEK_API_KEY
+    supports_thinking: true
+  - name: deepseek
+    model: deepseek-v4-pro
+    base_url: *deepseek_url
+    api_key_env: *deepseek_key
+    supports_thinking: true
+
+  - name: mimo
+    model: mimo-v2.5
+    base_url: &mimo_url https://api.xiaomimimo.com/v1
+    api_key_env: &mimo_key MIMO_API_KEY
+    supports_thinking: true
+  - name: mimo
+    model: mimo-v2.5-pro
+    base_url: *mimo_url
+    api_key_env: *mimo_key
+    supports_thinking: true
+
+  - name: kimi
+    model: kimi-k2.6
+    base_url: https://api.moonshot.cn/v1
+    api_key_env: MOONSHOT_API_KEY
+    supports_thinking: true
+
+  - name: qwen
+    model: qwen3.7-max
+    base_url: &qwen_url https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: &qwen_key DASHSCOPE_API_KEY
+    supports_thinking: true
+    thinking_style: &qwen_style qwen
+  - name: qwen
+    model: qwen3.7-plus
+    base_url: *qwen_url
+    api_key_env: *qwen_key
+    supports_thinking: true
+    thinking_style: *qwen_style
+  - name: qwen
+    model: qwen3.6-plus
+    base_url: *qwen_url
+    api_key_env: *qwen_key
+    supports_thinking: true
+    thinking_style: *qwen_style
+  - name: qwen
+    model: qwen3.6-flash
+    base_url: *qwen_url
+    api_key_env: *qwen_key
+    supports_thinking: true
+    thinking_style: *qwen_style
