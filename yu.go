@@ -5,6 +5,7 @@
 package yu
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -15,13 +16,16 @@ import (
 	"github.com/ktsoator/yu/llm/openai"
 	"github.com/ktsoator/yu/runner"
 	"github.com/ktsoator/yu/session"
+	sessiondatabase "github.com/ktsoator/yu/session/database"
 	"github.com/ktsoator/yu/tool"
 	"github.com/ktsoator/yu/tool/fstool"
 )
 
 const (
-	DefaultAppName = "yu"
-	DefaultUserID  = "local"
+	DefaultAppName   = "yu"
+	DefaultUserID    = "local"
+	SessionDriverEnv = "YU_SESSION_DRIVER"
+	SessionDSNEnv    = "YU_SESSION_DSN"
 
 	agentDescription = "A concise coding assistant in a terminal."
 	agentInstruction = "You are a coding assistant in a terminal. Be concise. Use the available tools to read files and explore the project when it helps answer the user."
@@ -87,6 +91,24 @@ func New(cfg Config) (*App, error) {
 		Sessions: sessions,
 		Tools:    tools,
 	}, nil
+}
+
+// OpenSessionServiceFromEnv returns a database session service when
+// YU_SESSION_DSN is set; otherwise it falls back to in-memory sessions.
+func OpenSessionServiceFromEnv(ctx context.Context) (session.Service, func(), error) {
+	driver := os.Getenv(SessionDriverEnv)
+	dsn := os.Getenv(SessionDSNEnv)
+	if dsn == "" {
+		if driver != "" {
+			return nil, nil, fmt.Errorf("%s is set but %s is empty", SessionDriverEnv, SessionDSNEnv)
+		}
+		return session.NewInMemoryService(), func() {}, nil
+	}
+	service, err := sessiondatabase.Open(ctx, driver, dsn)
+	if err != nil {
+		return nil, nil, err
+	}
+	return service, service.Close, nil
 }
 
 // BuildModel resolves the API key and constructs an openai-compatible client.

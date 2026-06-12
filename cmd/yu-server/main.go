@@ -64,7 +64,12 @@ func run(addr, modelName string) error {
 	if err != nil {
 		return err
 	}
-	app, err := yu.New(yu.Config{Model: model})
+	sessions, closeSessions, err := yu.OpenSessionServiceFromEnv(context.Background())
+	if err != nil {
+		return err
+	}
+	defer closeSessions()
+	app, err := yu.New(yu.Config{Model: model, Sessions: sessions})
 	if err != nil {
 		return err
 	}

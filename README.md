@@ -3,8 +3,9 @@
 Minimal terminal LLM agent.
 
 Yu is a small Go REPL for chatting with OpenAI-compatible model providers. It
-keeps conversation history in memory, streams model output into the terminal,
-and can show vendor reasoning deltas when the selected model supports thinking.
+keeps conversation history in memory or PostgreSQL, streams model output into
+the terminal, and can show vendor reasoning deltas when the selected model
+supports thinking.
 
 ## Configure models
 
@@ -55,6 +56,45 @@ Commands inside the REPL:
 
 `~/.yu/models.yaml` is required — Yu exits with an error if it's missing.
 
+## Persist sessions with a database
+
+By default sessions are kept in memory and disappear when Yu exits. To persist
+them with GORM, set `YU_SESSION_DRIVER` and `YU_SESSION_DSN` before starting the
+CLI or HTTP server:
+
+```env
+YU_SESSION_DRIVER=postgres
+YU_SESSION_DSN=postgres://yu:yu@localhost:5432/yu?sslmode=disable
+```
+
+`YU_SESSION_DRIVER` supports `postgres`, `sqlite`, and `mysql`. If
+`YU_SESSION_DSN` is set and the driver is omitted, Yu defaults to `postgres`.
+You can put these values in `~/.yu/.env` next to your provider API keys. Yu
+creates its session tables automatically on startup.
+
+For SQLite:
+
+```env
+YU_SESSION_DRIVER=sqlite
+YU_SESSION_DSN=yu.db
+```
+
+For local PostgreSQL development, start the included database:
+
+```sh
+docker compose up -d postgres
+```
+
+The included PostgreSQL container uses:
+
+```text
+host: localhost
+port: 5432
+database: yu
+user: yu
+password: yu
+```
+
 ## HTTP server
 
 The same agent can be served over HTTP:
@@ -71,7 +111,8 @@ go run ./cmd/yu-server -addr :8420 -model deepseek
   partial deltas included)
 
 The user is taken from the `X-User-ID` header, defaulting to `local`.
-Sessions are in-memory and lost on restart.
+Sessions use the same storage selected by `YU_SESSION_DSN`: database storage
+when it is set, otherwise in-memory storage that is lost on restart.
 
 ## Structure
 

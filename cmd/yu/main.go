@@ -42,7 +42,12 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	app, err := yu.New(yu.Config{Model: model})
+	sessions, closeSessions, err := yu.OpenSessionServiceFromEnv(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeSessions()
+	app, err := yu.New(yu.Config{Model: model, Sessions: sessions})
 	if err != nil {
 		return err
 	}
