@@ -46,7 +46,8 @@ MIMO_API_KEY=...
 go run ./cmd/yu
 ```
 
-At startup you'll be prompted to choose a model (press Enter for the first one).
+At startup Yu uses the first configured model. Switch models inside the REPL
+with `/model <name|number>`.
 
 Commands inside the REPL:
 
@@ -56,11 +57,10 @@ Commands inside the REPL:
 
 `~/.yu/models.yaml` is required — Yu exits with an error if it's missing.
 
-## Persist sessions with a database
+## Session database
 
-By default sessions are kept in memory and disappear when Yu exits. To persist
-them with GORM, set `YU_SESSION_DRIVER` and `YU_SESSION_DSN` before starting the
-CLI or HTTP server:
+The CLI stores sessions with GORM. Set `YU_SESSION_DSN` before starting Yu;
+`YU_SESSION_DRIVER` is optional and defaults to `postgres` when omitted:
 
 ```env
 YU_SESSION_DRIVER=postgres
@@ -70,7 +70,9 @@ YU_SESSION_DSN=postgres://yu:yu@localhost:5432/yu?sslmode=disable
 `YU_SESSION_DRIVER` supports `postgres`, `sqlite`, and `mysql`. If
 `YU_SESSION_DSN` is set and the driver is omitted, Yu defaults to `postgres`.
 You can put these values in `~/.yu/.env` next to your provider API keys. Yu
-creates its session tables automatically on startup.
+creates its session tables automatically on startup. Custom integrations can
+still choose their own session service, such as `session.NewInMemoryService()`
+or `session/database.Open(...)`.
 
 For SQLite:
 
@@ -95,32 +97,11 @@ user: yu
 password: yu
 ```
 
-## HTTP server
-
-The same agent can be served over HTTP:
-
-```sh
-go run ./cmd/yu-server -addr :8420 -model deepseek
-```
-
-- `POST /sessions` — create a session
-- `GET /sessions` — list sessions
-- `GET /sessions/{id}` — get a session with its full event history
-- `POST /sessions/{id}/messages` with `{"input": "..."}` — run one turn,
-  streamed back as server-sent events (one JSON `session.Event` per frame,
-  partial deltas included)
-
-The user is taken from the `X-User-ID` header, defaulting to `local`.
-Sessions use the same storage selected by `YU_SESSION_DSN`: database storage
-when it is set, otherwise in-memory storage that is lost on restart.
-
 ## Structure
 
 ```text
-yu.go                   # app assembly: config → agent + runner + sessions
 config/                 # ~/.yu/models.yaml profiles and config paths
-cmd/yu/                 # terminal REPL frontend
-cmd/yu-server/          # HTTP/SSE frontend
+cmd/yu/                 # terminal REPL frontend and default app assembly
 runner/                 # execution engine: session lifecycle + persistence
 agent/agent.go          # agent interface and invocation context
 agent/llmagent/         # LLM-backed agent: model→tool→model loop
