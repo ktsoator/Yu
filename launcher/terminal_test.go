@@ -9,11 +9,14 @@ import (
 	"github.com/ktsoator/yu/llm"
 	"github.com/ktsoator/yu/render"
 	"github.com/ktsoator/yu/session"
+	"github.com/ktsoator/yu/tool"
 )
 
 type fakeAgent struct{}
 
 func (fakeAgent) Name() string { return "fake" }
+
+func (fakeAgent) Tools() []tool.Tool { return nil }
 
 func (fakeAgent) Run(ctx context.Context, ictx *agent.InvocationContext) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {

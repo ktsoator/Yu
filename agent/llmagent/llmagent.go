@@ -29,6 +29,7 @@ type llmAgent struct {
 	description string
 	instruction string
 	model       llm.Model
+	tools       []tool.Tool
 	registry    *tool.Registry
 	toolDefs    []llm.ToolDef
 }
@@ -53,12 +54,17 @@ func New(cfg agent.Config) (agent.Agent, error) {
 		description: cfg.Description,
 		instruction: cfg.Instruction,
 		model:       cfg.Model,
+		tools:       readonlyTools(cfg.Tools),
 		registry:    registry,
 		toolDefs:    toolDefs(cfg.Tools),
 	}, nil
 }
 
 func (a *llmAgent) Name() string { return a.name }
+
+func (a *llmAgent) Tools() []tool.Tool {
+	return append([]tool.Tool(nil), a.tools...)
+}
 
 func (a *llmAgent) Run(ctx context.Context, ictx *agent.InvocationContext) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
@@ -218,4 +224,15 @@ func toolDefs(tools []tool.Executable) []llm.ToolDef {
 		})
 	}
 	return defs
+}
+
+func readonlyTools(tools []tool.Executable) []tool.Tool {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]tool.Tool, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, t)
+	}
+	return out
 }

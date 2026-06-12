@@ -10,9 +10,7 @@ import (
 )
 
 func selectModel(models []config.Model, scanner *bufio.Scanner) config.Model {
-	// Empty input selects the first profile, so model config order defines the
-	// default model.
-	fmt.Println("Select a model:")
+	fmt.Println("Models:")
 	for i, m := range models {
 		marker := " "
 		if i == 0 {
@@ -29,9 +27,6 @@ func selectModel(models []config.Model, scanner *bufio.Scanner) config.Model {
 		input := strings.TrimSpace(scanner.Text())
 		if input == "" {
 			return models[0]
-		}
-		if n, err := strconv.Atoi(input); err == nil && n >= 1 && n <= len(models) {
-			return models[n-1]
 		}
 		if model, ok := findModel(models, input); ok {
 			return model

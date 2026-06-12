@@ -10,10 +10,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ktsoator/yu"
+	"github.com/ktsoator/yu/agent"
 	"github.com/ktsoator/yu/config"
+	"github.com/ktsoator/yu/llm/openai"
 	"github.com/ktsoator/yu/render"
 	"github.com/ktsoator/yu/render/clirender"
+	"github.com/ktsoator/yu/runner"
 	"github.com/ktsoator/yu/session"
 )
 
@@ -21,21 +23,45 @@ type repl struct {
 	ctx              context.Context
 	scanner          *bufio.Scanner
 	models           []config.Model
-	app              *yu.App
+	appName          string
+	userID           string
+	agent            agent.Agent
+	runner           *runner.Runner
+	sessions         session.Service
 	sessionID        string
 	currentModelName string
 	renderer         func() render.Renderer
 }
 
-func newREPL(ctx context.Context, scanner *bufio.Scanner, models []config.Model, app *yu.App, sessionID, modelName string) *repl {
+type replConfig struct {
+	Context   context.Context
+	Scanner   *bufio.Scanner
+	Models    []config.Model
+	AppName   string
+	UserID    string
+	Agent     agent.Agent
+	Runner    *runner.Runner
+	Sessions  session.Service
+	ModelName string
+	Renderer  func() render.Renderer
+}
+
+func newREPL(cfg replConfig) *repl {
+	renderer := cfg.Renderer
+	if renderer == nil {
+		renderer = func() render.Renderer { return clirender.New() }
+	}
 	return &repl{
-		ctx:              ctx,
-		scanner:          scanner,
-		models:           models,
-		app:              app,
-		sessionID:        sessionID,
-		currentModelName: modelName,
-		renderer:         func() render.Renderer { return clirender.New() },
+		ctx:              cfg.Context,
+		scanner:          cfg.Scanner,
+		models:           cfg.Models,
+		appName:          cfg.AppName,
+		userID:           cfg.UserID,
+		agent:            cfg.Agent,
+		runner:           cfg.Runner,
+		sessions:         cfg.Sessions,
+		currentModelName: cfg.ModelName,
+		renderer:         renderer,
 	}
 }
 
@@ -91,10 +117,9 @@ func hasContinuation(s string) bool {
 }
 
 func (r *repl) prompt() string {
-	return fmt.Sprintf("\n\033[1;36mYu\033[0m \033[90m%s %s %s\033[0m › ",
+	return fmt.Sprintf("\n\033[1;36mYu\033[0m \033[90m%s %s\033[0m › ",
 		shortModelName(r.currentModelName),
-		shortSessionID(r.sessionID),
-		"think:"+onOff(r.app.Agent.Thinking()),
+		"think:"+onOff(r.agent.Thinking()),
 	)
 }
 
@@ -135,8 +160,11 @@ func (r *repl) send(input string) error {
 	ctx, stop := signal.NotifyContext(r.ctx, os.Interrupt)
 	defer stop()
 
+	if err := r.ensureSession(ctx); err != nil {
+		return err
+	}
 	renderer := r.renderer()
-	for ev, err := range r.app.Runner.Run(ctx, yu.DefaultUserID, r.sessionID, input) {
+	for ev, err := range r.runner.Run(ctx, r.userID, r.sessionID, input) {
 		if err != nil {
 			renderer.Finish()
 			if errors.Is(err, context.Canceled) {
@@ -151,10 +179,29 @@ func (r *repl) send(input string) error {
 	return nil
 }
 
+func (r *repl) ensureSession(ctx context.Context) error {
+	if r.sessionID != "" {
+		return nil
+	}
+	resp, err := r.sessions.Create(ctx, &session.CreateRequest{
+		AppName: r.appName,
+		UserID:  r.userID,
+	})
+	if err != nil {
+		return err
+	}
+	r.sessionID = resp.Session.ID
+	return nil
+}
+
 func (r *repl) printHistory() {
-	resp, err := r.app.Sessions.Get(r.ctx, &session.GetRequest{
-		AppName:   r.app.AppName,
-		UserID:    yu.DefaultUserID,
+	if r.sessionID == "" {
+		fmt.Println("No session yet. Send a message or use /new to create one.")
+		return
+	}
+	resp, err := r.sessions.Get(r.ctx, &session.GetRequest{
+		AppName:   r.appName,
+		UserID:    r.userID,
 		SessionID: r.sessionID,
 	})
 	if err != nil {
@@ -172,9 +219,9 @@ func (r *repl) printHistory() {
 }
 
 func (r *repl) newSession() {
-	resp, err := r.app.Sessions.Create(r.ctx, &session.CreateRequest{
-		AppName: r.app.AppName,
-		UserID:  yu.DefaultUserID,
+	resp, err := r.sessions.Create(r.ctx, &session.CreateRequest{
+		AppName: r.appName,
+		UserID:  r.userID,
 	})
 	if err != nil {
 		printError(err)
@@ -189,9 +236,9 @@ func (r *repl) switchSession(sessionID string) {
 		fmt.Println("Usage: /session <id>")
 		return
 	}
-	resp, err := r.app.Sessions.Get(r.ctx, &session.GetRequest{
-		AppName:   r.app.AppName,
-		UserID:    yu.DefaultUserID,
+	resp, err := r.sessions.Get(r.ctx, &session.GetRequest{
+		AppName:   r.appName,
+		UserID:    r.userID,
 		SessionID: sessionID,
 	})
 	if err != nil {
@@ -203,9 +250,9 @@ func (r *repl) switchSession(sessionID string) {
 }
 
 func (r *repl) printSessions() {
-	resp, err := r.app.Sessions.List(r.ctx, &session.ListRequest{
-		AppName: r.app.AppName,
-		UserID:  yu.DefaultUserID,
+	resp, err := r.sessions.List(r.ctx, &session.ListRequest{
+		AppName: r.appName,
+		UserID:  r.userID,
 	})
 	if err != nil {
 		printError(err)
@@ -268,42 +315,53 @@ func truncate(s string, max int) string {
 }
 
 func (r *repl) switchModel(spec string) {
-	mc, ok := findModel(r.models, spec)
-	if !ok {
-		if spec != "" {
+	var mc config.Model
+	if spec == "" {
+		mc = selectModel(r.models, r.scanner)
+	} else {
+		var ok bool
+		mc, ok = findModel(r.models, spec)
+		if !ok {
 			fmt.Printf("Model not found: %s\n", spec)
 			r.printModels()
 			return
 		}
-		mc = selectModel(r.models, r.scanner)
 	}
-	model, err := yu.BuildModel(mc)
-	if err != nil {
-		printError(err)
+	apiKey := os.Getenv(mc.APIKeyEnv)
+	if apiKey == "" {
+		printError(fmt.Errorf("missing API key: set %s in your environment or ~/.yu/.env", mc.APIKeyEnv))
 		return
 	}
-	r.app.Agent.SetModel(model)
+	model := openai.New(openai.Config{
+		APIKey:           apiKey,
+		BaseURL:          mc.BaseURL,
+		Model:            mc.Model,
+		SupportsThinking: mc.SupportsThinking,
+		ThinkingStyle:    mc.ThinkingStyle,
+		ReasoningPath:    mc.ReasoningPath,
+	})
+	r.agent.SetModel(model)
 	r.currentModelName = model.Name()
-	fmt.Printf("Switched to %s (thinking %s)\n", model.Name(), onOff(r.app.Agent.Thinking()))
+	fmt.Printf("Switched to %s (thinking %s)\n", model.Name(), onOff(r.agent.Thinking()))
 }
 
 func (r *repl) setThinking(spec string) {
-	if !r.app.Agent.SupportsThinking() {
+	if !r.agent.SupportsThinking() {
 		fmt.Println("Thinking is not supported by the current model configuration.")
 		return
 	}
 	switch spec {
 	case "", "toggle":
-		r.app.Agent.SetThinking(!r.app.Agent.Thinking())
+		r.agent.SetThinking(!r.agent.Thinking())
 	case "on":
-		r.app.Agent.SetThinking(true)
+		r.agent.SetThinking(true)
 	case "off":
-		r.app.Agent.SetThinking(false)
+		r.agent.SetThinking(false)
 	default:
 		fmt.Println("Usage: /think [on|off]")
 		return
 	}
-	fmt.Printf("Thinking: %s\n", onOff(r.app.Agent.Thinking()))
+	fmt.Printf("Thinking: %s\n", onOff(r.agent.Thinking()))
 }
 
 func (r *repl) printHelp() {
@@ -322,9 +380,15 @@ func (r *repl) printHelp() {
 }
 
 func (r *repl) printStatus() {
-	resp, err := r.app.Sessions.Get(r.ctx, &session.GetRequest{
-		AppName:   r.app.AppName,
-		UserID:    yu.DefaultUserID,
+	if r.sessionID == "" {
+		fmt.Printf("Model: %s\n", r.currentModelName)
+		fmt.Printf("Thinking: %s\n", onOff(r.agent.Thinking()))
+		fmt.Println("Session: none yet")
+		return
+	}
+	resp, err := r.sessions.Get(r.ctx, &session.GetRequest{
+		AppName:   r.appName,
+		UserID:    r.userID,
 		SessionID: r.sessionID,
 	})
 	if err != nil {
@@ -332,7 +396,7 @@ func (r *repl) printStatus() {
 		return
 	}
 	fmt.Printf("Model: %s\n", r.currentModelName)
-	fmt.Printf("Thinking: %s\n", onOff(r.app.Agent.Thinking()))
+	fmt.Printf("Thinking: %s\n", onOff(r.agent.Thinking()))
 	fmt.Printf("Session: %s  Events: %d\n", resp.Session.ID, len(resp.Session.Events))
 }
 
@@ -349,16 +413,9 @@ func (r *repl) printModels() {
 
 func shortModelName(name string) string {
 	if name == "" {
-		return "model:?"
+		return "?"
 	}
-	return "model:" + truncateMiddle(name, 24)
-}
-
-func shortSessionID(id string) string {
-	if id == "" {
-		return "sess:?"
-	}
-	return "sess:" + truncateMiddle(id, 14)
+	return truncateMiddle(name, 24)
 }
 
 func truncateMiddle(s string, max int) string {

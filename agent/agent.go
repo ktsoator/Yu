@@ -35,6 +35,7 @@ type InvocationContext struct {
 // non-partial events are finished messages for the runner to persist.
 type Agent interface {
 	Name() string
+	Tools() []tool.Tool
 	Run(ctx context.Context, ictx *InvocationContext) iter.Seq2[*session.Event, error]
 	SetModel(m llm.Model)
 	SetThinking(on bool)
