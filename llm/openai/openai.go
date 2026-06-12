@@ -9,10 +9,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/ktsoator/yu/llm"
-	"github.com/ktsoator/yu/weblog"
 	oai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/tidwall/gjson"
@@ -89,16 +87,6 @@ func (c *Client) Chat(ctx context.Context, messages []llm.Message, tools []llm.T
 		params.Tools = toToolParams(tools)
 	}
 
-	// Snapshot the request and time the round-trip so it can be logged for the
-	// web viewer regardless of how the stream ends.
-	started := time.Now()
-	rec := weblog.Record{
-		Time:     started.UTC().Format(time.RFC3339Nano),
-		Model:    c.modelName,
-		Thinking: c.thinking,
-		Request:  weblog.Request{Messages: append([]llm.Message(nil), messages...), Tools: tools},
-	}
-
 	stream := c.api.Chat.Completions.NewStreaming(ctx, params, reqOpts...)
 
 	var content, reasoning strings.Builder
@@ -136,22 +124,16 @@ func (c *Client) Chat(ctx context.Context, messages []llm.Message, tools []llm.T
 			}
 		}
 	}
-	rec.DurationMS = time.Since(started).Milliseconds()
 	if err := stream.Err(); err != nil {
-		rec.Error = err.Error()
-		weblog.Log(rec)
 		return llm.Message{}, err
 	}
 
-	reply := llm.Message{
+	return llm.Message{
 		Role:      llm.Assistant,
 		Content:   content.String(),
 		Reasoning: reasoning.String(),
 		ToolCalls: calls.result(),
-	}
-	rec.Response = reply
-	weblog.Log(rec)
-	return reply, nil
+	}, nil
 }
 
 // toolCallAccumulator reassembles streamed tool-call fragments by index.

@@ -7,14 +7,15 @@ import (
 	"path/filepath"
 
 	"github.com/joho/godotenv"
-	"github.com/ktsoator/yu/weblog"
+	"github.com/ktsoator/yu/session"
 )
 
 const (
 	yuDirName      = ".yu"
 	configFileName = "models.yaml"
 	envFileName    = ".env"
-	logDirName     = "logs"
+	appName        = "yu"
+	defaultUserID  = "local"
 )
 
 func main() {
@@ -31,15 +32,6 @@ func run(ctx context.Context) error {
 	}
 	_ = godotenv.Load(envPath)
 
-	// Record every model round-trip to ~/.yu/logs for the /logs web viewer.
-	logDir, err := yuPath(logDirName)
-	if err != nil {
-		return err
-	}
-	if err := weblog.Init(logDir); err != nil {
-		return fmt.Errorf("init log dir %s: %w", logDir, err)
-	}
-
 	// Load selectable model profiles up front. API keys are resolved from the
 	// environment later, so ~/.yu/models.yaml can describe providers without secrets.
 	configPath, err := yuPath(configFileName)
@@ -51,8 +43,17 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("load model config from %s: %w", configPath, err)
 	}
 
-	repl := newREPL(ctx, os.Stdin, models)
-	agent, err := setupAgent(models, repl.scanner)
+	sessions := session.NewInMemoryService()
+	initialSession, err := sessions.Create(ctx, &session.CreateRequest{
+		AppName: appName,
+		UserID:  defaultUserID,
+	})
+	if err != nil {
+		return err
+	}
+
+	repl := newREPL(ctx, os.Stdin, models, sessions, initialSession.Session.ID)
+	agent, err := setupAgent(models, repl.scanner, sessions)
 	if err != nil {
 		return err
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ktsoator/yu/agent"
 	"github.com/ktsoator/yu/llm"
+	"github.com/ktsoator/yu/session"
 	"github.com/ktsoator/yu/tool"
 )
 
@@ -25,8 +26,11 @@ type thinkingModel interface {
 type llmAgent struct {
 	name        string
 	description string
+	appName     string
+	instruction string
+	userID      string
 	model       llm.Model
-	messages    []llm.Message
+	sessions    session.Service
 	registry    tool.Registry
 	toolDefs    []llm.ToolDef
 }
@@ -38,20 +42,37 @@ func New(cfg agent.Config) (agent.Agent, error) {
 	if cfg.Instruction == "" {
 		return nil, fmt.Errorf("agent instruction is required")
 	}
+	sessions := cfg.Sessions
+	if sessions == nil {
+		sessions = session.NewInMemoryService()
+	}
+	appName := cfg.AppName
+	if appName == "" {
+		appName = cfg.Name
+	}
+	if appName == "" {
+		appName = "yu"
+	}
+	userID := cfg.UserID
+	if userID == "" {
+		userID = "local"
+	}
 	return &llmAgent{
 		name:        cfg.Name,
 		description: cfg.Description,
+		appName:     appName,
+		instruction: cfg.Instruction,
+		userID:      userID,
 		model:       cfg.Model,
-		// Keep the system instruction as the first message in every request.
-		messages: []llm.Message{{Role: llm.System, Content: cfg.Instruction}},
-		registry: tool.NewRegistry(cfg.Tools),
-		toolDefs: toolDefs(cfg.Tools),
+		sessions:    sessions,
+		registry:    tool.NewRegistry(cfg.Tools),
+		toolDefs:    toolDefs(cfg.Tools),
 	}, nil
 }
 
-func (a *llmAgent) Run(ctx context.Context, userInput string) iter.Seq2[llm.Event, error] {
+func (a *llmAgent) Run(ctx context.Context, sessionID, userInput string) iter.Seq2[llm.Event, error] {
 	return func(yield func(llm.Event, error) bool) {
-		_, err := a.runTurn(ctx, userInput, func(ev llm.Event) bool {
+		_, err := a.runTurn(ctx, sessionID, userInput, func(ev llm.Event) bool {
 			return yield(ev, nil)
 		})
 		if err != nil && !errors.Is(err, llm.ErrEventStreamStopped) {
@@ -62,50 +83,109 @@ func (a *llmAgent) Run(ctx context.Context, userInput string) iter.Seq2[llm.Even
 
 // runTurn handles one user input. It may call the model multiple times when the
 // model asks for tools: model -> tools -> model -> final answer.
-func (a *llmAgent) runTurn(ctx context.Context, userInput string, onEvent func(llm.Event) bool) (llm.Message, error) {
-	// Remember where this turn started so any provider error rolls the whole
-	// turn back (user message + any tool round-trips) and leaves history clean.
-	start := len(a.messages)
-	a.messages = append(a.messages, llm.Message{Role: llm.User, Content: userInput})
+func (a *llmAgent) runTurn(ctx context.Context, sessionID, userInput string, onEvent func(llm.Event) bool) (llm.Message, error) {
+	sess, err := a.session(ctx, sessionID)
+	if err != nil {
+		return llm.Message{}, err
+	}
+	// Keep this turn local until it finishes so provider/tool errors do not
+	// leave partial messages in the session history.
+	turn := []session.Message{{Role: session.RoleUser, Content: userInput}}
 
 	for range maxToolIterations {
-		reply, err := a.model.Chat(ctx, a.messages, a.toolDefs, onEvent)
+		reply, err := a.model.Chat(ctx, toLLMMessages(sess.Messages, turn), a.toolDefs, onEvent)
 		if err != nil {
-			a.messages = a.messages[:start]
 			return llm.Message{}, err
 		}
-		a.messages = append(a.messages, reply)
+		turn = append(turn, toSessionMessage(reply))
 
 		if len(reply.ToolCalls) == 0 {
+			if err := a.commitTurn(ctx, sessionID, turn); err != nil {
+				return llm.Message{}, err
+			}
 			return reply, nil
 		}
 
 		// Run each requested tool and feed the results back as Tool messages,
 		// then loop so the model can use them to produce its next turn.
-		if err := a.runTools(ctx, reply.ToolCalls, onEvent); err != nil {
-			a.messages = a.messages[:start]
+		toolMessages, err := a.runTools(ctx, reply.ToolCalls, onEvent)
+		if err != nil {
 			return llm.Message{}, err
 		}
+		turn = append(turn, toolMessages...)
 	}
 
 	return llm.Message{}, fmt.Errorf("tool loop exceeded %d iterations", maxToolIterations)
 }
 
+func (a *llmAgent) session(ctx context.Context, sessionID string) (*session.Session, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("session ID is required")
+	}
+	resp, err := a.sessions.Get(ctx, &session.GetRequest{
+		AppName:   a.appName,
+		UserID:    a.userID,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Session.Messages) > 0 {
+		return resp.Session, nil
+	}
+	if _, err := a.sessions.AppendMessage(ctx, &session.AppendMessageRequest{
+		AppName:   a.appName,
+		UserID:    a.userID,
+		SessionID: sessionID,
+		Message: session.Message{
+			Role:    session.RoleSystem,
+			Content: a.instruction,
+		},
+	}); err != nil {
+		return nil, err
+	}
+	resp, err = a.sessions.Get(ctx, &session.GetRequest{
+		AppName:   a.appName,
+		UserID:    a.userID,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Session, nil
+}
+
+func (a *llmAgent) commitTurn(ctx context.Context, sessionID string, messages []session.Message) error {
+	for _, msg := range messages {
+		if _, err := a.sessions.AppendMessage(ctx, &session.AppendMessageRequest{
+			AppName:   a.appName,
+			UserID:    a.userID,
+			SessionID: sessionID,
+			Message:   msg,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // runTools executes the model's requested tools and appends their results to
 // conversation history as tool messages.
-func (a *llmAgent) runTools(ctx context.Context, calls []llm.ToolCall, onEvent func(llm.Event) bool) error {
+func (a *llmAgent) runTools(ctx context.Context, calls []llm.ToolCall, onEvent func(llm.Event) bool) ([]session.Message, error) {
+	messages := make([]session.Message, 0, len(calls))
 	for _, tc := range calls {
 		result, err := a.runTool(ctx, tc, onEvent)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		a.messages = append(a.messages, llm.Message{
-			Role:       llm.Tool,
+		messages = append(messages, session.Message{
+			Role:       session.RoleTool,
+			Name:       tc.Name,
 			ToolCallID: tc.ID,
 			Content:    result,
 		})
 	}
-	return nil
+	return messages, nil
 }
 
 // runTool executes a single tool call, surfacing activity via onEvent. Tool
