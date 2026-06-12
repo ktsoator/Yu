@@ -37,6 +37,7 @@ func run(ctx context.Context) error {
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
 	model, err := yu.BuildModel(selectModel(models, scanner))
 	if err != nil {
 		return err
@@ -55,7 +56,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	repl := newREPL(ctx, scanner, models, app, initialSession.Session.ID)
+	repl := newREPL(ctx, scanner, models, app, initialSession.Session.ID, model.Name())
 	return repl.run()
 }
 
@@ -68,5 +69,5 @@ func printAgentInfo(app *yu.App, modelName string) {
 	fmt.Printf("  Model: %s\n", modelName)
 	fmt.Printf("  Thinking: %s\n", onOff(app.Agent.Thinking()))
 	fmt.Printf("  Tools: %s\n", strings.Join(names, ", "))
-	fmt.Printf("  Commands: /model, /think, /new, /sessions, /session <id>, /history, /exit\n")
+	fmt.Printf("  Commands: /help, /model, /think, /new, /sessions, /session <id>, /history, /exit\n")
 }

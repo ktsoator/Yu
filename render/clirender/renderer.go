@@ -34,6 +34,8 @@ func (r *Renderer) OnEvent(ev *session.Event) {
 		for _, tc := range ev.Message.ToolCalls {
 			r.tool(tc.Name, summarizeArgs(tc.Arguments))
 		}
+	case session.EventError:
+		r.err(ev.Error)
 	}
 }
 
@@ -48,6 +50,13 @@ func (r *Renderer) tool(name, args string) {
 	r.closeReasoning(false)
 	r.newlineIfOpen()
 	fmt.Println(formatToolNotice(name, args))
+	r.inContent = false
+}
+
+func (r *Renderer) err(text string) {
+	r.closeReasoning(false)
+	r.newlineIfOpen()
+	fmt.Printf("\033[31merror:\033[0m %s\n", text)
 	r.inContent = false
 }
 

@@ -33,8 +33,26 @@ func selectModel(models []config.Model, scanner *bufio.Scanner) config.Model {
 		if n, err := strconv.Atoi(input); err == nil && n >= 1 && n <= len(models) {
 			return models[n-1]
 		}
-		fmt.Printf("Enter a number between 1 and %d.\n", len(models))
+		if model, ok := findModel(models, input); ok {
+			return model
+		}
+		fmt.Printf("Enter a number between 1 and %d, or a model name.\n", len(models))
 	}
+}
+
+func findModel(models []config.Model, spec string) (config.Model, bool) {
+	if spec == "" {
+		return config.Model{}, false
+	}
+	if n, err := strconv.Atoi(spec); err == nil && n >= 1 && n <= len(models) {
+		return models[n-1], true
+	}
+	for _, m := range models {
+		if m.Name == spec || m.Model == spec {
+			return m, true
+		}
+	}
+	return config.Model{}, false
 }
 
 func onOff(enabled bool) string {
