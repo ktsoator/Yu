@@ -1,7 +1,5 @@
 package session
 
-import "time"
-
 type Role string
 
 const (
@@ -17,13 +15,13 @@ type ToolCall struct {
 	Arguments string `json:"arguments"`
 }
 
+// Message is the content payload of an Event. Identity and timing live on the
+// enclosing Event, so Message itself is pure conversation content.
 type Message struct {
-	ID         string     `json:"id"`
 	Role       Role       `json:"role"`
 	Content    string     `json:"content,omitempty"`
 	Reasoning  string     `json:"reasoning,omitempty"`
 	Name       string     `json:"name,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
 }

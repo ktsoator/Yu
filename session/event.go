@@ -5,14 +5,32 @@ import "time"
 type EventType string
 
 const (
-	EventMessageCreated EventType = "message.created"
-	EventError          EventType = "error"
+	// EventMessage is a finished user or assistant message. Assistant messages
+	// that request tools carry them in Message.ToolCalls.
+	EventMessage EventType = "message"
+	// EventToolResult is the output of one executed tool call.
+	EventToolResult EventType = "tool.result"
+	// EventError records a failed invocation step.
+	EventError EventType = "error"
+
+	// EventContentDelta and EventReasoningDelta are streaming fragments of an
+	// assistant message. They are always Partial and never persisted.
+	EventContentDelta   EventType = "content.delta"
+	EventReasoningDelta EventType = "reasoning.delta"
 )
 
+// Event is the unit of session history: everything that happens during an
+// invocation — messages, tool results, errors — is an appended event.
 type Event struct {
-	Type      EventType `json:"type"`
-	SessionID string    `json:"session_id"`
-	Message   *Message  `json:"message,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	ID           string    `json:"id"`
+	InvocationID string    `json:"invocation_id,omitempty"`
+	SessionID    string    `json:"session_id,omitempty"`
+	Type         EventType `json:"type"`
+	Author       string    `json:"author,omitempty"` // "user", agent name, or tool name
+	Message      Message   `json:"message"`
+	Error        string    `json:"error,omitempty"`
+	// Partial marks streaming fragments that flow to renderers but are never
+	// appended to session history.
+	Partial   bool      `json:"partial,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }

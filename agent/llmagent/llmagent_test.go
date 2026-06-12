@@ -56,46 +56,77 @@ func (fakeTool) Execute(_ context.Context, args json.RawMessage) (string, error)
 
 var _ tool.Tool = fakeTool{}
 
-func TestRunStoresTurnInRequestedSession(t *testing.T) {
-	ctx := context.Background()
-	sessions := session.NewInMemoryService()
-	sess := createTestSession(t, sessions, "user-1")
+func testICtx(events ...session.Event) *agent.InvocationContext {
+	return &agent.InvocationContext{
+		InvocationID: "inv-test",
+		AppName:      "yu",
+		UserID:       "user-1",
+		Session: &session.Session{
+			ID:      "sess-1",
+			AppName: "yu",
+			UserID:  "user-1",
+			Events:  events,
+		},
+	}
+}
+
+func userEvent(content string) session.Event {
+	return session.Event{
+		Type:    session.EventMessage,
+		Author:  "user",
+		Message: session.Message{Role: session.RoleUser, Content: content},
+	}
+}
+
+func TestRunYieldsFinalMessageEvent(t *testing.T) {
 	model := &fakeModel{replies: []llm.Message{{
 		Role:    llm.Assistant,
 		Content: "hello",
 	}}}
-
-	ag, err := New(agent.Config{
-		Name:        "yu",
-		Model:       model,
-		Instruction: "be useful",
-		Sessions:    sessions,
-		UserID:      "user-1",
-	})
+	ag, err := New(agent.Config{Name: "yu", Model: model, Instruction: "be useful"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	drain(t, ag.Run(ctx, sess.ID, "hi"))
 
-	got := getTestSession(t, sessions, "user-1", sess.ID)
-	if len(got.Messages) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(got.Messages))
+	events := collect(t, ag.Run(context.Background(), testICtx(userEvent("hi"))))
+
+	final := finalEvents(events)
+	if len(final) != 1 {
+		t.Fatalf("expected 1 final event, got %d: %+v", len(final), final)
 	}
-	if got.Messages[0].Role != session.RoleSystem {
-		t.Fatalf("expected system message, got %s", got.Messages[0].Role)
+	if final[0].Type != session.EventMessage || final[0].Message.Role != session.RoleAssistant {
+		t.Fatalf("unexpected final event: %+v", final[0])
 	}
-	if got.Messages[1].Role != session.RoleUser || got.Messages[1].Content != "hi" {
-		t.Fatalf("unexpected user message: %+v", got.Messages[1])
+	if final[0].Message.Content != "hello" {
+		t.Fatalf("unexpected content: %q", final[0].Message.Content)
 	}
-	if got.Messages[2].Role != session.RoleAssistant || got.Messages[2].Content != "hello" {
-		t.Fatalf("unexpected assistant message: %+v", got.Messages[2])
+	if final[0].InvocationID != "inv-test" {
+		t.Fatalf("expected invocation ID propagated, got %q", final[0].InvocationID)
+	}
+	if !hasPartial(events, session.EventContentDelta) {
+		t.Fatal("expected streamed content delta event")
 	}
 }
 
-func TestRunStoresToolRoundTripInSession(t *testing.T) {
-	ctx := context.Background()
-	sessions := session.NewInMemoryService()
-	sess := createTestSession(t, sessions, "user-1")
+func TestRunInjectsInstructionPerRequest(t *testing.T) {
+	model := &fakeModel{replies: []llm.Message{{Role: llm.Assistant, Content: "ok"}}}
+	ag, err := New(agent.Config{Name: "yu", Model: model, Instruction: "be useful"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	collect(t, ag.Run(context.Background(), testICtx(userEvent("hi"))))
+
+	seen := model.seen[0]
+	if seen[0].Role != llm.System || seen[0].Content != "be useful" {
+		t.Fatalf("expected system instruction first, got %+v", seen[0])
+	}
+	if seen[1].Role != llm.User || seen[1].Content != "hi" {
+		t.Fatalf("expected user message second, got %+v", seen[1])
+	}
+}
+
+func TestRunToolRoundTrip(t *testing.T) {
 	model := &fakeModel{replies: []llm.Message{
 		{
 			Role: llm.Assistant,
@@ -107,33 +138,35 @@ func TestRunStoresToolRoundTripInSession(t *testing.T) {
 		},
 		{Role: llm.Assistant, Content: "done"},
 	}}
-
 	ag, err := New(agent.Config{
 		Name:        "yu",
 		Model:       model,
 		Instruction: "be useful",
 		Tools:       []tool.Tool{fakeTool{}},
-		Sessions:    sessions,
-		UserID:      "user-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	drain(t, ag.Run(ctx, sess.ID, "use tool"))
 
-	got := getTestSession(t, sessions, "user-1", sess.ID)
-	if len(got.Messages) != 5 {
-		t.Fatalf("expected 5 messages, got %d", len(got.Messages))
+	events := collect(t, ag.Run(context.Background(), testICtx(userEvent("use tool"))))
+
+	final := finalEvents(events)
+	if len(final) != 3 {
+		t.Fatalf("expected 3 final events, got %d: %+v", len(final), final)
 	}
-	if len(got.Messages[2].ToolCalls) != 1 {
-		t.Fatalf("expected assistant tool call, got %+v", got.Messages[2])
+	if len(final[0].Message.ToolCalls) != 1 {
+		t.Fatalf("expected assistant tool call event, got %+v", final[0])
 	}
-	if got.Messages[3].Role != session.RoleTool || got.Messages[3].Content != "from tool" {
-		t.Fatalf("unexpected tool message: %+v", got.Messages[3])
+	if final[1].Type != session.EventToolResult || final[1].Message.Content != "from tool" {
+		t.Fatalf("unexpected tool result event: %+v", final[1])
 	}
-	if got.Messages[4].Role != session.RoleAssistant || got.Messages[4].Content != "done" {
-		t.Fatalf("unexpected final assistant message: %+v", got.Messages[4])
+	if final[1].Message.ToolCallID != "call-1" {
+		t.Fatalf("expected tool result linked to call-1, got %+v", final[1])
 	}
+	if final[2].Message.Content != "done" {
+		t.Fatalf("unexpected final assistant event: %+v", final[2])
+	}
+
 	if len(model.seen) != 2 {
 		t.Fatalf("expected 2 model calls, got %d", len(model.seen))
 	}
@@ -143,69 +176,33 @@ func TestRunStoresToolRoundTripInSession(t *testing.T) {
 	}
 }
 
-func TestRunUsesRequestedSession(t *testing.T) {
-	ctx := context.Background()
-	sessions := session.NewInMemoryService()
-	first := createTestSession(t, sessions, "user-1")
-	second := createTestSession(t, sessions, "user-1")
-	model := &fakeModel{replies: []llm.Message{
-		{Role: llm.Assistant, Content: "first"},
-		{Role: llm.Assistant, Content: "second"},
-	}}
-
-	ag, err := New(agent.Config{
-		Name:        "yu",
-		Model:       model,
-		Instruction: "be useful",
-		Sessions:    sessions,
-		UserID:      "user-1",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	drain(t, ag.Run(ctx, first.ID, "one"))
-	drain(t, ag.Run(ctx, second.ID, "two"))
-
-	first = getTestSession(t, sessions, "user-1", first.ID)
-	second = getTestSession(t, sessions, "user-1", second.ID)
-	if first.Messages[1].Content != "one" {
-		t.Fatalf("unexpected first session user message: %+v", first.Messages)
-	}
-	if second.Messages[1].Content != "two" {
-		t.Fatalf("unexpected second session user message: %+v", second.Messages)
-	}
-}
-
-func drain(t *testing.T, events iter.Seq2[llm.Event, error]) {
+func collect(t *testing.T, events iter.Seq2[*session.Event, error]) []*session.Event {
 	t.Helper()
-	for _, err := range events {
+	var out []*session.Event
+	for ev, err := range events {
 		if err != nil {
 			t.Fatal(err)
 		}
+		out = append(out, ev)
 	}
+	return out
 }
 
-func createTestSession(t *testing.T, sessions session.Service, userID string) *session.Session {
-	t.Helper()
-	resp, err := sessions.Create(context.Background(), &session.CreateRequest{
-		AppName: "yu",
-		UserID:  userID,
-	})
-	if err != nil {
-		t.Fatal(err)
+func finalEvents(events []*session.Event) []*session.Event {
+	var out []*session.Event
+	for _, ev := range events {
+		if !ev.Partial {
+			out = append(out, ev)
+		}
 	}
-	return resp.Session
+	return out
 }
 
-func getTestSession(t *testing.T, sessions session.Service, userID, sessionID string) *session.Session {
-	t.Helper()
-	resp, err := sessions.Get(context.Background(), &session.GetRequest{
-		AppName:   "yu",
-		UserID:    userID,
-		SessionID: sessionID,
-	})
-	if err != nil {
-		t.Fatal(err)
+func hasPartial(events []*session.Event, typ session.EventType) bool {
+	for _, ev := range events {
+		if ev.Partial && ev.Type == typ {
+			return true
+		}
 	}
-	return resp.Session
+	return false
 }

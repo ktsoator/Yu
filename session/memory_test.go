@@ -18,34 +18,62 @@ func TestInMemoryServiceAppendAndGet(t *testing.T) {
 		t.Fatal("expected session ID")
 	}
 
-	appended, err := service.AppendMessage(ctx, &AppendMessageRequest{
+	appended, err := service.AppendEvent(ctx, &AppendEventRequest{
 		AppName:   "yu",
 		UserID:    "user-1",
 		SessionID: sess.ID,
-		Message: Message{
-			Role:    RoleUser,
-			Content: "hello",
+		Event: Event{
+			Type:   EventMessage,
+			Author: "user",
+			Message: Message{
+				Role:    RoleUser,
+				Content: "hello",
+			},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if appended.Message.ID == "" {
-		t.Fatal("expected message ID")
+	if appended.Event.ID == "" {
+		t.Fatal("expected event ID")
 	}
-	if appended.Message.CreatedAt.IsZero() {
-		t.Fatal("expected message CreatedAt")
+	if appended.Event.SessionID != sess.ID {
+		t.Fatalf("expected event session ID %s, got %s", sess.ID, appended.Event.SessionID)
+	}
+	if appended.Event.CreatedAt.IsZero() {
+		t.Fatal("expected event CreatedAt")
 	}
 
 	got, err := service.Get(ctx, &GetRequest{AppName: "yu", UserID: "user-1", SessionID: sess.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Session.Messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(got.Session.Messages))
+	if len(got.Session.Events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(got.Session.Events))
 	}
-	if got.Session.Messages[0].Content != "hello" {
-		t.Fatalf("unexpected content: %s", got.Session.Messages[0].Content)
+	if got.Session.Events[0].Message.Content != "hello" {
+		t.Fatalf("unexpected content: %s", got.Session.Events[0].Message.Content)
+	}
+}
+
+func TestInMemoryServiceRejectsPartialEvents(t *testing.T) {
+	ctx := context.Background()
+	service := NewInMemoryService()
+	created, err := service.Create(ctx, &CreateRequest{AppName: "yu", UserID: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AppendEvent(ctx, &AppendEventRequest{
+		AppName:   "yu",
+		UserID:    "user-1",
+		SessionID: created.Session.ID,
+		Event: Event{
+			Type:    EventContentDelta,
+			Partial: true,
+			Message: Message{Role: RoleAssistant, Content: "frag"},
+		},
+	}); err == nil {
+		t.Fatal("expected partial event append to fail")
 	}
 }
 
@@ -61,18 +89,22 @@ func TestInMemoryServiceReturnsClones(t *testing.T) {
 		t.Fatal(err)
 	}
 	sess := created.Session
-	if _, err := service.AppendMessage(ctx, &AppendMessageRequest{
+	if _, err := service.AppendEvent(ctx, &AppendEventRequest{
 		AppName:   "yu",
 		UserID:    "user-1",
 		SessionID: sess.ID,
-		Message: Message{
-			Role:    RoleAssistant,
-			Content: "hello",
-			ToolCalls: []ToolCall{{
-				ID:        "call-1",
-				Name:      "read_file",
-				Arguments: `{"path":"README.md"}`,
-			}},
+		Event: Event{
+			Type:   EventMessage,
+			Author: "yu",
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: "hello",
+				ToolCalls: []ToolCall{{
+					ID:        "call-1",
+					Name:      "read_file",
+					Arguments: `{"path":"README.md"}`,
+				}},
+			},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -82,19 +114,19 @@ func TestInMemoryServiceReturnsClones(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got.Session.Messages[0].Content = "mutated"
-	got.Session.Messages[0].ToolCalls[0].Name = "mutated"
+	got.Session.Events[0].Message.Content = "mutated"
+	got.Session.Events[0].Message.ToolCalls[0].Name = "mutated"
 	got.Session.State["x"] = "mutated"
 
 	again, err := service.Get(ctx, &GetRequest{AppName: "yu", UserID: "user-1", SessionID: sess.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Session.Messages[0].Content != "hello" {
-		t.Fatalf("stored message was mutated: %q", again.Session.Messages[0].Content)
+	if again.Session.Events[0].Message.Content != "hello" {
+		t.Fatalf("stored event was mutated: %q", again.Session.Events[0].Message.Content)
 	}
-	if again.Session.Messages[0].ToolCalls[0].Name != "read_file" {
-		t.Fatalf("stored tool call was mutated: %q", again.Session.Messages[0].ToolCalls[0].Name)
+	if again.Session.Events[0].Message.ToolCalls[0].Name != "read_file" {
+		t.Fatalf("stored tool call was mutated: %q", again.Session.Events[0].Message.ToolCalls[0].Name)
 	}
 	if _, ok := again.Session.State["x"]; ok {
 		t.Fatal("stored state was mutated")

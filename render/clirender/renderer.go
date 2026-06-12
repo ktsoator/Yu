@@ -1,10 +1,11 @@
 package clirender
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/ktsoator/yu/llm"
+	"github.com/ktsoator/yu/session"
 )
 
 type Renderer struct {
@@ -17,14 +18,22 @@ func New() *Renderer {
 	return &Renderer{}
 }
 
-func (r *Renderer) OnEvent(ev llm.Event) {
+// OnEvent renders one event. Partial deltas stream as they arrive; the
+// finished assistant message only contributes tool-call notices because its
+// text was already streamed. User and tool-result events are not echoed.
+func (r *Renderer) OnEvent(ev *session.Event) {
 	switch ev.Type {
-	case llm.EventToolCall:
-		r.tool(ev.ToolName, ev.ToolArgs)
-	case llm.EventReasoningDelta:
-		r.reasoning(ev.Text)
-	case llm.EventContentDelta:
-		r.content(ev.Text)
+	case session.EventReasoningDelta:
+		r.reasoning(ev.Message.Reasoning)
+	case session.EventContentDelta:
+		r.content(ev.Message.Content)
+	case session.EventMessage:
+		if ev.Message.Role != session.RoleAssistant {
+			return
+		}
+		for _, tc := range ev.Message.ToolCalls {
+			r.tool(tc.Name, summarizeArgs(tc.Arguments))
+		}
 	}
 }
 
@@ -87,4 +96,17 @@ func formatToolNotice(name, args string) string {
 		return fmt.Sprintf("\033[90m↳ \033[36mtool\033[90m \033[1;36m%s\033[0m", name)
 	}
 	return fmt.Sprintf("\033[90m↳ \033[36mtool\033[90m \033[1;36m%s\033[90m %s\033[0m", name, args)
+}
+
+// summarizeArgs renders tool arguments compactly for the activity note,
+// preferring a single "path" value when present.
+func summarizeArgs(args string) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(args), &m); err != nil {
+		return ""
+	}
+	if p, ok := m["path"].(string); ok {
+		return p
+	}
+	return args
 }

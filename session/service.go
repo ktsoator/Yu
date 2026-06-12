@@ -7,7 +7,7 @@ type Service interface {
 	Get(context.Context, *GetRequest) (*GetResponse, error)
 	List(context.Context, *ListRequest) (*ListResponse, error)
 	Delete(context.Context, *DeleteRequest) error
-	AppendMessage(context.Context, *AppendMessageRequest) (*AppendMessageResponse, error)
+	AppendEvent(context.Context, *AppendEventRequest) (*AppendEventResponse, error)
 }
 
 type CreateRequest struct {
@@ -46,13 +46,13 @@ type DeleteRequest struct {
 	SessionID string
 }
 
-type AppendMessageRequest struct {
+type AppendEventRequest struct {
 	AppName   string
 	UserID    string
 	SessionID string
-	Message   Message
+	Event     Event
 }
 
-type AppendMessageResponse struct {
-	Message Message
+type AppendEventResponse struct {
+	Event Event
 }

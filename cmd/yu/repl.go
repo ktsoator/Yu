@@ -3,13 +3,15 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
 
-	"github.com/ktsoator/yu/agent"
+	"github.com/ktsoator/yu"
+	"github.com/ktsoator/yu/config"
 	"github.com/ktsoator/yu/render"
 	"github.com/ktsoator/yu/render/clirender"
 	"github.com/ktsoator/yu/session"
@@ -18,26 +20,26 @@ import (
 type repl struct {
 	ctx       context.Context
 	scanner   *bufio.Scanner
-	models    []modelConfig
-	sessions  session.Service
+	models    []config.Model
+	app       *yu.App
 	sessionID string
 	renderer  func() render.Renderer
 }
 
-func newREPL(ctx context.Context, in io.Reader, models []modelConfig, sessions session.Service, sessionID string) *repl {
+func newREPL(ctx context.Context, scanner *bufio.Scanner, models []config.Model, app *yu.App, sessionID string) *repl {
 	return &repl{
 		ctx:       ctx,
-		scanner:   bufio.NewScanner(in),
+		scanner:   scanner,
 		models:    models,
-		sessions:  sessions,
+		app:       app,
 		sessionID: sessionID,
 		renderer:  func() render.Renderer { return clirender.New() },
 	}
 }
 
 // Main REPL: slash commands are handled locally; normal input goes through
-// the agent and streams chunks back into this terminal callback.
-func (r *repl) run(agent agent.Agent) error {
+// the runner and streams events back into this terminal callback.
+func (r *repl) run() error {
 	for {
 		fmt.Print("\nYu › ")
 		if !r.scanner.Scan() {
@@ -52,10 +54,10 @@ func (r *repl) run(agent agent.Agent) error {
 		case "/exit", "/quit":
 			return nil
 		case "/model":
-			r.switchModel(agent)
+			r.switchModel()
 			continue
 		case "/think":
-			toggleThinking(agent)
+			r.toggleThinking()
 			continue
 		case "/new":
 			r.newSession()
@@ -75,7 +77,7 @@ func (r *repl) run(agent agent.Agent) error {
 			continue
 		}
 
-		if err := r.send(agent, input); err != nil {
+		if err := r.send(input); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		}
 	}
@@ -85,10 +87,34 @@ func (r *repl) run(agent agent.Agent) error {
 	return nil
 }
 
+func (r *repl) send(input string) error {
+	// Ctrl+C while a turn is running cancels just that turn: the signal
+	// context aborts the in-flight model request and the REPL returns to the
+	// prompt. Once stop() restores default handling, Ctrl+C at the prompt
+	// exits the process as usual.
+	ctx, stop := signal.NotifyContext(r.ctx, os.Interrupt)
+	defer stop()
+
+	renderer := r.renderer()
+	for ev, err := range r.app.Runner.Run(ctx, yu.DefaultUserID, r.sessionID, input) {
+		if err != nil {
+			renderer.Finish()
+			if errors.Is(err, context.Canceled) {
+				fmt.Println("(interrupted)")
+				return nil
+			}
+			return err
+		}
+		renderer.OnEvent(ev)
+	}
+	renderer.Finish()
+	return nil
+}
+
 func (r *repl) printHistory() {
-	resp, err := r.sessions.Get(r.ctx, &session.GetRequest{
-		AppName:   appName,
-		UserID:    defaultUserID,
+	resp, err := r.app.Sessions.Get(r.ctx, &session.GetRequest{
+		AppName:   r.app.AppName,
+		UserID:    yu.DefaultUserID,
 		SessionID: r.sessionID,
 	})
 	if err != nil {
@@ -96,21 +122,19 @@ func (r *repl) printHistory() {
 		return
 	}
 	sess := resp.Session
-	fmt.Printf("Session: %s  User: %s  Messages: %d\n", sess.ID, sess.UserID, len(sess.Messages))
-	for i, msg := range sess.Messages {
-		fmt.Printf(" %2d. %-9s %s\n", i+1, historyRole(msg), historyText(msg))
-		if len(msg.ToolCalls) > 0 {
-			for _, tc := range msg.ToolCalls {
-				fmt.Printf("     ↳ tool %s %s\n", tc.Name, truncate(tc.Arguments, 160))
-			}
+	fmt.Printf("Session: %s  User: %s  Events: %d\n", sess.ID, sess.UserID, len(sess.Events))
+	for i, ev := range sess.Events {
+		fmt.Printf(" %2d. %-9s %s\n", i+1, historyRole(ev), historyText(ev))
+		for _, tc := range ev.Message.ToolCalls {
+			fmt.Printf("     ↳ tool %s %s\n", tc.Name, truncate(tc.Arguments, 160))
 		}
 	}
 }
 
 func (r *repl) newSession() {
-	resp, err := r.sessions.Create(r.ctx, &session.CreateRequest{
-		AppName: appName,
-		UserID:  defaultUserID,
+	resp, err := r.app.Sessions.Create(r.ctx, &session.CreateRequest{
+		AppName: r.app.AppName,
+		UserID:  yu.DefaultUserID,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -125,9 +149,9 @@ func (r *repl) switchSession(sessionID string) {
 		fmt.Println("Usage: /session <id>")
 		return
 	}
-	resp, err := r.sessions.Get(r.ctx, &session.GetRequest{
-		AppName:   appName,
-		UserID:    defaultUserID,
+	resp, err := r.app.Sessions.Get(r.ctx, &session.GetRequest{
+		AppName:   r.app.AppName,
+		UserID:    yu.DefaultUserID,
 		SessionID: sessionID,
 	})
 	if err != nil {
@@ -135,13 +159,13 @@ func (r *repl) switchSession(sessionID string) {
 		return
 	}
 	r.sessionID = resp.Session.ID
-	fmt.Printf("Switched session: %s  Messages: %d\n", resp.Session.ID, len(resp.Session.Messages))
+	fmt.Printf("Switched session: %s  Events: %d\n", resp.Session.ID, len(resp.Session.Events))
 }
 
 func (r *repl) printSessions() {
-	resp, err := r.sessions.List(r.ctx, &session.ListRequest{
-		AppName: appName,
-		UserID:  defaultUserID,
+	resp, err := r.app.Sessions.List(r.ctx, &session.ListRequest{
+		AppName: r.app.AppName,
+		UserID:  yu.DefaultUserID,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -157,18 +181,26 @@ func (r *repl) printSessions() {
 		if sess.ID == r.sessionID {
 			marker = "*"
 		}
-		fmt.Printf(" %s %s  messages=%d  updated=%s\n", marker, sess.ID, len(sess.Messages), sess.UpdatedAt.Format("15:04:05"))
+		fmt.Printf(" %s %s  events=%d  updated=%s\n", marker, sess.ID, len(sess.Events), sess.UpdatedAt.Format("15:04:05"))
 	}
 }
 
-func historyRole(msg session.Message) string {
+func historyRole(ev session.Event) string {
+	if ev.Type == session.EventError {
+		return "error"
+	}
+	msg := ev.Message
 	if msg.Name != "" {
 		return string(msg.Role) + ":" + msg.Name
 	}
 	return string(msg.Role)
 }
 
-func historyText(msg session.Message) string {
+func historyText(ev session.Event) string {
+	if ev.Error != "" {
+		return truncate(ev.Error, 220)
+	}
+	msg := ev.Message
 	if msg.ToolCallID != "" && msg.Content != "" {
 		return fmt.Sprintf("#%s %s", msg.ToolCallID, truncate(msg.Content, 180))
 	}
@@ -195,35 +227,22 @@ func truncate(s string, max int) string {
 	return s[:max-3] + "..."
 }
 
-func (r *repl) switchModel(ag agent.Agent) {
+func (r *repl) switchModel() {
 	mc := selectModel(r.models, r.scanner)
-	model, err := buildModel(mc)
+	model, err := yu.BuildModel(mc)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return
 	}
-	ag.SetModel(model)
-	fmt.Printf("Switched to %s (thinking %s)\n", model.Name(), onOff(ag.Thinking()))
+	r.app.Agent.SetModel(model)
+	fmt.Printf("Switched to %s (thinking %s)\n", model.Name(), onOff(r.app.Agent.Thinking()))
 }
 
-func toggleThinking(ag agent.Agent) {
-	if !ag.SupportsThinking() {
+func (r *repl) toggleThinking() {
+	if !r.app.Agent.SupportsThinking() {
 		fmt.Println("Thinking is not supported by the current model configuration.")
 		return
 	}
-	ag.SetThinking(!ag.Thinking())
-	fmt.Printf("Thinking: %s\n", onOff(ag.Thinking()))
-}
-
-func (r *repl) send(agent agent.Agent, input string) error {
-	renderer := r.renderer()
-	for ev, err := range agent.Run(r.ctx, r.sessionID, input) {
-		if err != nil {
-			renderer.Finish()
-			return err
-		}
-		renderer.OnEvent(ev)
-	}
-	renderer.Finish()
-	return nil
+	r.app.Agent.SetThinking(!r.app.Agent.Thinking())
+	fmt.Printf("Thinking: %s\n", onOff(r.app.Agent.Thinking()))
 }

@@ -41,7 +41,7 @@ func (s *InMemoryService) Create(ctx context.Context, req *CreateRequest) (*Crea
 		ID:        sessionID,
 		AppName:   req.AppName,
 		UserID:    req.UserID,
-		Messages:  []Message{},
+		Events:    []Event{},
 		State:     cloneState(req.State),
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -111,12 +111,15 @@ func (s *InMemoryService) Delete(ctx context.Context, req *DeleteRequest) error 
 	return nil
 }
 
-func (s *InMemoryService) AppendMessage(ctx context.Context, req *AppendMessageRequest) (*AppendMessageResponse, error) {
+func (s *InMemoryService) AppendEvent(ctx context.Context, req *AppendEventRequest) (*AppendEventResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if req == nil {
-		return nil, fmt.Errorf("append message: nil request")
+		return nil, fmt.Errorf("append event: nil request")
+	}
+	if req.Event.Partial {
+		return nil, fmt.Errorf("append event: partial events are not persisted")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -126,16 +129,19 @@ func (s *InMemoryService) AppendMessage(ctx context.Context, req *AppendMessageR
 		return nil, fmt.Errorf("session not found: %s", req.SessionID)
 	}
 
-	msg := req.Message
-	if msg.ID == "" {
-		msg.ID = newID("msg")
+	ev := req.Event
+	if ev.ID == "" {
+		ev.ID = newID("ev")
 	}
-	if msg.CreatedAt.IsZero() {
-		msg.CreatedAt = time.Now()
+	if ev.SessionID == "" {
+		ev.SessionID = session.ID
 	}
-	session.Messages = append(session.Messages, cloneMessage(msg))
+	if ev.CreatedAt.IsZero() {
+		ev.CreatedAt = time.Now()
+	}
+	session.Events = append(session.Events, cloneEvent(ev))
 	session.UpdatedAt = time.Now()
-	return &AppendMessageResponse{Message: cloneMessage(msg)}, nil
+	return &AppendEventResponse{Event: cloneEvent(ev)}, nil
 }
 
 func sessionKey(appName, userID, sessionID string) string {
@@ -147,18 +153,18 @@ func cloneSession(in *Session) *Session {
 		return nil
 	}
 	out := *in
-	out.Messages = make([]Message, len(in.Messages))
-	for i, msg := range in.Messages {
-		out.Messages[i] = cloneMessage(msg)
+	out.Events = make([]Event, len(in.Events))
+	for i, ev := range in.Events {
+		out.Events[i] = cloneEvent(ev)
 	}
 	out.State = cloneState(in.State)
 	return &out
 }
 
-func cloneMessage(in Message) Message {
+func cloneEvent(in Event) Event {
 	out := in
-	if in.ToolCalls != nil {
-		out.ToolCalls = append([]ToolCall(nil), in.ToolCalls...)
+	if in.Message.ToolCalls != nil {
+		out.Message.ToolCalls = append([]ToolCall(nil), in.Message.ToolCalls...)
 	}
 	return out
 }

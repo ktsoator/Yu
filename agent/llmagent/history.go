@@ -5,13 +5,17 @@ import (
 	"github.com/ktsoator/yu/session"
 )
 
-func toLLMMessages(history, turn []session.Message) []llm.Message {
-	out := make([]llm.Message, 0, len(history)+len(turn))
-	for _, msg := range history {
-		out = append(out, toLLMMessage(msg))
-	}
-	for _, msg := range turn {
-		out = append(out, toLLMMessage(msg))
+// toLLMMessages builds the model context: the agent instruction first, then
+// the finished conversation events. The instruction is injected per request
+// rather than stored in history, so changing it applies to old sessions too.
+func toLLMMessages(instruction string, events []session.Event) []llm.Message {
+	out := make([]llm.Message, 0, len(events)+1)
+	out = append(out, llm.Message{Role: llm.System, Content: instruction})
+	for _, ev := range events {
+		if ev.Partial || ev.Type == session.EventError {
+			continue
+		}
+		out = append(out, toLLMMessage(ev.Message))
 	}
 	return out
 }

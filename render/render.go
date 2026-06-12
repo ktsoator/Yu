@@ -1,8 +1,8 @@
 package render
 
-import "github.com/ktsoator/yu/llm"
+import "github.com/ktsoator/yu/session"
 
 type Renderer interface {
-	OnEvent(llm.Event)
+	OnEvent(*session.Event)
 	Finish()
 }

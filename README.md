@@ -42,7 +42,7 @@ MIMO_API_KEY=...
 ## Run
 
 ```sh
-go run .
+go run ./cmd/yu
 ```
 
 At startup you'll be prompted to choose a model (press Enter for the first one).
@@ -55,15 +55,37 @@ Commands inside the REPL:
 
 `~/.yu/models.yaml` is required — Yu exits with an error if it's missing.
 
+## HTTP server
+
+The same agent can be served over HTTP:
+
+```sh
+go run ./cmd/yu-server -addr :8420 -model deepseek
+```
+
+- `POST /sessions` — create a session
+- `GET /sessions` — list sessions
+- `GET /sessions/{id}` — get a session with its full event history
+- `POST /sessions/{id}/messages` with `{"input": "..."}` — run one turn,
+  streamed back as server-sent events (one JSON `session.Event` per frame,
+  partial deltas included)
+
+The user is taken from the `X-User-ID` header, defaulting to `local`.
+Sessions are in-memory and lost on restart.
+
 ## Structure
 
 ```text
-main.go                 # startup wiring
-repl.go                 # terminal REPL and slash commands
-config.go               # ~/.yu/models.yaml parsing and model selection
-model.go                # OpenAI-compatible model construction
-agent/agent.go          # agent interface and config
-agent/llmagent/         # LLM-backed agent implementation
+yu.go                   # app assembly: config → agent + runner + sessions
+config/                 # ~/.yu/models.yaml profiles and config paths
+cmd/yu/                 # terminal REPL frontend
+cmd/yu-server/          # HTTP/SSE frontend
+runner/                 # execution engine: session lifecycle + persistence
+agent/agent.go          # agent interface and invocation context
+agent/llmagent/         # LLM-backed agent: model→tool→model loop
+session/                # event-sourced history and session service
 llm/                    # shared model/message abstractions
 llm/openai/             # OpenAI-compatible streaming client
+tool/                   # tool interface; tool/fstool file tools
+render/                 # event renderers (CLI)
 ```
