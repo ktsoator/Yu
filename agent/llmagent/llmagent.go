@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"os"
 
 	"github.com/ktsoator/yu/agent"
 	"github.com/ktsoator/yu/llm"
@@ -28,7 +29,7 @@ type llmAgent struct {
 	description string
 	instruction string
 	model       llm.Model
-	registry    tool.Registry
+	registry    *tool.Registry
 	toolDefs    []llm.ToolDef
 }
 
@@ -43,12 +44,16 @@ func New(cfg agent.Config) (agent.Agent, error) {
 	if name == "" {
 		name = "yu"
 	}
+	registry, err := tool.NewRegistry(cfg.Tools)
+	if err != nil {
+		return nil, err
+	}
 	return &llmAgent{
 		name:        name,
 		description: cfg.Description,
 		instruction: cfg.Instruction,
 		model:       cfg.Model,
-		registry:    tool.NewRegistry(cfg.Tools),
+		registry:    registry,
 		toolDefs:    toolDefs(cfg.Tools),
 	}, nil
 }
@@ -94,7 +99,7 @@ func (a *llmAgent) run(ctx context.Context, ictx *agent.InvocationContext, emit 
 		// Run each requested tool and feed the results back as Tool messages,
 		// then loop so the model can use them to produce its next turn.
 		for _, tc := range reply.ToolCalls {
-			result := a.execTool(ctx, tc)
+			result := a.execTool(ctx, ictx, tc)
 			messages = append(messages, llm.Message{
 				Role:       llm.Tool,
 				Content:    result,
@@ -111,16 +116,29 @@ func (a *llmAgent) run(ctx context.Context, ictx *agent.InvocationContext, emit 
 
 // execTool executes a single tool call. Tool errors are returned as text so
 // the model can see and recover from them.
-func (a *llmAgent) execTool(ctx context.Context, tc llm.ToolCall) string {
-	t, ok := a.registry[tc.Name]
+func (a *llmAgent) execTool(ctx context.Context, ictx *agent.InvocationContext, tc llm.ToolCall) string {
+	t, ok := a.registry.Get(tc.Name)
 	if !ok {
 		return fmt.Sprintf("error: unknown tool %q", tc.Name)
 	}
-	result, err := t.Execute(ctx, json.RawMessage(tc.Arguments))
+	toolCtx := toolContext(ctx, ictx)
+	result, err := t.Execute(toolCtx, json.RawMessage(tc.Arguments))
 	if err != nil {
 		return "error: " + err.Error()
 	}
-	return result
+	return result.Text()
+}
+
+func toolContext(ctx context.Context, ictx *agent.InvocationContext) tool.Context {
+	wd, _ := os.Getwd()
+	return tool.Context{
+		Context:      ctx,
+		AppName:      ictx.AppName,
+		UserID:       ictx.UserID,
+		SessionID:    ictx.Session.ID,
+		InvocationID: ictx.InvocationID,
+		WorkDir:      wd,
+	}
 }
 
 func (a *llmAgent) partialEvent(ictx *agent.InvocationContext, ev llm.Event) *session.Event {
@@ -187,7 +205,7 @@ func (a *llmAgent) SupportsThinking() bool {
 	return ok && model.SupportsThinking()
 }
 
-func toolDefs(tools []tool.Tool) []llm.ToolDef {
+func toolDefs(tools []tool.Executable) []llm.ToolDef {
 	if len(tools) == 0 {
 		return nil
 	}

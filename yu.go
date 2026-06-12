@@ -49,7 +49,7 @@ type App struct {
 	Agent    agent.Agent
 	Runner   *runner.Runner
 	Sessions session.Service
-	Tools    []tool.Tool
+	Tools    []tool.Executable
 }
 
 func New(cfg Config) (*App, error) {
@@ -65,7 +65,7 @@ func New(cfg Config) (*App, error) {
 	if cfg.Model == nil {
 		return nil, fmt.Errorf("app model is required")
 	}
-	tools := []tool.Tool{fstool.NewReadFile(), fstool.NewListDir()}
+	tools := []tool.Executable{fstool.NewReadFile(), fstool.NewListDir()}
 	ag, err := llmagent.New(agent.Config{
 		Name:        appName,
 		Model:       cfg.Model,

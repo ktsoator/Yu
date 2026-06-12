@@ -44,17 +44,17 @@ func (fakeTool) Schema() map[string]any {
 	}
 }
 
-func (fakeTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
+func (fakeTool) Execute(_ tool.Context, args json.RawMessage) (tool.Result, error) {
 	var in struct {
 		Value string `json:"value"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
-		return "", err
+		return tool.Result{}, err
 	}
-	return in.Value, nil
+	return tool.Result{Content: in.Value}, nil
 }
 
-var _ tool.Tool = fakeTool{}
+var _ tool.Executable = fakeTool{}
 
 func testICtx(events ...session.Event) *agent.InvocationContext {
 	return &agent.InvocationContext{
@@ -142,7 +142,7 @@ func TestRunToolRoundTrip(t *testing.T) {
 		Name:        "yu",
 		Model:       model,
 		Instruction: "be useful",
-		Tools:       []tool.Tool{fakeTool{}},
+		Tools:       []tool.Executable{fakeTool{}},
 	})
 	if err != nil {
 		t.Fatal(err)

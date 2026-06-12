@@ -48,19 +48,19 @@ func (weatherTool) Schema() map[string]any {
 	}
 }
 
-func (weatherTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
+func (weatherTool) Execute(_ tool.Context, args json.RawMessage) (tool.Result, error) {
 	var in struct {
 		City string `json:"city"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
-		return "", err
+		return tool.Result{}, err
 	}
-	return in.City + ": sunny, 26C", nil
+	return tool.Result{Content: in.City + ": sunny, 26C"}, nil
 }
 
-var _ tool.Tool = weatherTool{}
+var _ tool.Executable = weatherTool{}
 
-func newTestRunner(t *testing.T, model llm.Model, tools []tool.Tool) (*Runner, session.Service, string) {
+func newTestRunner(t *testing.T, model llm.Model, tools []tool.Executable) (*Runner, session.Service, string) {
 	t.Helper()
 	sessions := session.NewInMemoryService()
 	created, err := sessions.Create(context.Background(), &session.CreateRequest{
@@ -144,7 +144,7 @@ func TestRunPersistsToolRoundTrip(t *testing.T) {
 		},
 		{Role: llm.Assistant, Content: "Beijing is sunny, 26C"},
 	}}
-	r, sessions, sessionID := newTestRunner(t, model, []tool.Tool{weatherTool{}})
+	r, sessions, sessionID := newTestRunner(t, model, []tool.Executable{weatherTool{}})
 
 	for _, err := range r.Run(context.Background(), "user-1", sessionID, "weather in beijing?") {
 		if err != nil {
