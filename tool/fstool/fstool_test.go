@@ -210,3 +210,95 @@ func TestEditFileErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyPatchAddsFile(t *testing.T) {
+	dir := t.TempDir()
+	patch := `*** Begin Patch
+*** Add File: docs/readme.txt
++hello
++world
+*** End Patch`
+
+	if _, err := applyPatch(tool.Context{WorkDir: dir}, applyPatchArgs{Patch: patch}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "docs", "readme.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello\nworld\n" {
+		t.Fatalf("content = %q", got)
+	}
+}
+
+func TestApplyPatchUpdatesFile(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, "a.txt", "one\ntwo\nthree\n")
+	patch := `*** Begin Patch
+*** Update File: a.txt
+@@
+ one
+-two
++TWO
+ three
+*** End Patch`
+
+	if _, err := applyPatch(tool.Context{WorkDir: dir}, applyPatchArgs{Patch: patch}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "one\nTWO\nthree\n" {
+		t.Fatalf("content = %q", got)
+	}
+}
+
+func TestApplyPatchDeletesFile(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, "old.txt", "bye\n")
+	patch := `*** Begin Patch
+*** Delete File: old.txt
+*** End Patch`
+
+	if _, err := applyPatch(tool.Context{WorkDir: dir}, applyPatchArgs{Patch: patch}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "old.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected file to be deleted, got err %v", err)
+	}
+}
+
+func TestApplyPatchRejectsEscape(t *testing.T) {
+	dir := t.TempDir()
+	patch := `*** Begin Patch
+*** Add File: ../escape.txt
++nope
+*** End Patch`
+
+	if _, err := applyPatch(tool.Context{WorkDir: dir}, applyPatchArgs{Patch: patch}); err == nil {
+		t.Fatal("expected escape path to be rejected")
+	}
+}
+
+func TestApplyPatchSummary(t *testing.T) {
+	tl := NewApplyPatch()
+	s, ok := tl.(tool.Summarizer)
+	if !ok {
+		t.Fatal("apply_patch should implement tool.Summarizer")
+	}
+	got := s.Summary(`{"patch":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n+more\n*** End Patch"}`)
+	if got != "a.txt · +2 -1" {
+		t.Fatalf("summary = %q", got)
+	}
+}
+
+func TestApplyPatchSummaryPartialEscapedPatch(t *testing.T) {
+	got := applyPatchSummary(`{"patch":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n+more`)
+	if got != "a.txt · +2 -1" {
+		t.Fatalf("summary = %q", got)
+	}
+}

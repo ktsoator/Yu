@@ -94,6 +94,7 @@ func run(ctx context.Context) error {
 		fstool.NewGlob(),
 		fstool.NewWriteFile(),
 		fstool.NewEditFile(),
+		fstool.NewApplyPatch(),
 		shell.NewBash(),
 	}
 	ag, err := llmagent.New(agent.Config{

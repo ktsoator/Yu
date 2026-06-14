@@ -42,6 +42,68 @@ func editFileSummary(args string) string {
 	return strings.Join(parts, " · ")
 }
 
+func applyPatchSummary(args string) string {
+	patch := jsonStringValue(args, "patch")
+	if patch == "" {
+		return ""
+	}
+	paths := patchPaths(patch)
+	added, removed := patchLineStats(patch)
+	stats := fmt.Sprintf("+%d -%d", added, removed)
+	switch len(paths) {
+	case 0:
+		return stats
+	case 1:
+		return paths[0] + " · " + stats
+	default:
+		return fmt.Sprintf("%d files · %s", len(paths), stats)
+	}
+}
+
+func patchPaths(patch string) []string {
+	var paths []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(normalizePatchText(patch), "\n") {
+		line = strings.TrimSpace(line)
+		var path string
+		switch {
+		case strings.HasPrefix(line, "*** Add File: "):
+			path = strings.TrimSpace(strings.TrimPrefix(line, "*** Add File: "))
+		case strings.HasPrefix(line, "*** Update File: "):
+			path = strings.TrimSpace(strings.TrimPrefix(line, "*** Update File: "))
+		case strings.HasPrefix(line, "*** Delete File: "):
+			path = strings.TrimSpace(strings.TrimPrefix(line, "*** Delete File: "))
+		}
+		if path != "" && !seen[path] {
+			seen[path] = true
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
+func patchLineStats(patch string) (int, int) {
+	var added, removed int
+	for _, line := range strings.Split(normalizePatchText(patch), "\n") {
+		switch {
+		case strings.HasPrefix(line, "+++"), strings.HasPrefix(line, "---"):
+			continue
+		case strings.HasPrefix(line, "+"):
+			added++
+		case strings.HasPrefix(line, "-"):
+			removed++
+		}
+	}
+	return added, removed
+}
+
+func normalizePatchText(patch string) string {
+	patch = strings.ReplaceAll(patch, "\r\n", "\n")
+	patch = strings.ReplaceAll(patch, `\r\n`, "\n")
+	patch = strings.ReplaceAll(patch, `\n`, "\n")
+	return patch
+}
+
 func jsonStringValue(raw, field string) string {
 	if value := gjson.Get(raw, field); value.Exists() {
 		return value.String()
