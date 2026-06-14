@@ -56,9 +56,20 @@ func run(ctx context.Context) error {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
 
-	// Startup uses the first profile as the default model. Users can switch
-	// later inside the REPL with /model <name|number>.
-	mc := models[0]
+	workDir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	if !confirmWorkspaceTrust(scanner, workDir) {
+		fmt.Println("Workspace not trusted. Exiting.")
+		return nil
+	}
+
+	// Startup asks for the initial model. Users can switch later inside the
+	// REPL with /model <name|number>.
+	printStartupModelHeader()
+	mc := selectModel(models, scanner)
+	clearTerminal()
 	model := openai.New(openai.Config{
 		APIKey:           os.Getenv(mc.APIKeyEnv),
 		BaseURL:          mc.BaseURL,

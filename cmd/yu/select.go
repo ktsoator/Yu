@@ -10,14 +10,15 @@ import (
 )
 
 func selectModel(models []config.Model, scanner *bufio.Scanner) config.Model {
-	fmt.Println("Models:")
+	fmt.Println("\033[90m╭─ available models\033[0m")
 	for i, m := range models {
 		marker := " "
 		if i == 0 {
-			marker = "*"
+			marker = "›"
 		}
-		fmt.Printf(" %s %d) %-10s %s\n", marker, i+1, m.Name, m.Model)
+		fmt.Printf("\033[90m│\033[0m %s %d. \033[1m%-10s\033[0m \033[90m%s\033[0m\n", marker, i+1, m.Name, m.Model)
 	}
+	fmt.Println("\033[90m╰─ Enter to use the highlighted model\033[0m")
 
 	for {
 		fmt.Print("model › ")
