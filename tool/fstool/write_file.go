@@ -20,6 +20,7 @@ func NewWriteFile() tool.Tool {
 		Name:        "write_file",
 		Description: "Create or overwrite a file with the given content.",
 		ReadOnly:    false,
+		Summary:     writeFileSummary,
 	}, writeFile)
 	if err != nil {
 		panic(err)

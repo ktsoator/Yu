@@ -18,8 +18,8 @@ func TestSummarizeArgs(t *testing.T) {
 		{"no display key", `{"value":"x"}`, ""},
 	}
 	for _, c := range cases {
-		if got := summarizeArgs(c.in); got != c.want {
-			t.Errorf("%s: summarizeArgs(%q) = %q, want %q", c.name, c.in, got, c.want)
+		if got := SummarizeArgs(c.in); got != c.want {
+			t.Errorf("%s: SummarizeArgs(%q) = %q, want %q", c.name, c.in, got, c.want)
 		}
 	}
 }
@@ -41,6 +41,23 @@ func TestRendererSummarizePrefersToolThenFallsBack(t *testing.T) {
 	}
 }
 
+func TestSummarizeResult(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"short verbatim", "wrote 42 bytes to a.go", "wrote 42 bytes to a.go"},
+		{"error shown", "error: old_string not found in a.go", "error: old_string not found in a.go"},
+		{"no output", "", "(no output)"},
+		{"trailing newline trimmed", "only line\n", "only line"},
+		{"multiline counted", "a\nb\nc", "3 lines"},
+	}
+	for _, c := range cases {
+		if got := summarizeResult(c.in); got != c.want {
+			t.Errorf("%s: summarizeResult(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
 func TestRendererSummarizeNilToolSummary(t *testing.T) {
 	r := New(nil)
 	if got := r.summarize("read_file", `{"path":"a.go"}`); got != "a.go" {
@@ -50,7 +67,7 @@ func TestRendererSummarizeNilToolSummary(t *testing.T) {
 
 func TestSummarizeArgsTruncatesLongValue(t *testing.T) {
 	in := `{"command":"` + strings.Repeat("a", 200) + `"}`
-	got := summarizeArgs(in)
+	got := SummarizeArgs(in)
 	if n := len([]rune(got)); n > 80 {
 		t.Fatalf("not truncated: %d runes", n)
 	}

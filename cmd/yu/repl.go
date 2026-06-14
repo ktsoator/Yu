@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -25,18 +27,48 @@ import (
 // reading the answer here never races with the main input loop.
 func confirmTool(scanner *bufio.Scanner) agent.ToolApprover {
 	return func(t tool.Tool, args string) (bool, error) {
-		fmt.Printf("\n\033[33m⚠ tool %q wants to run\033[0m\n  %s\n  args: %s\nAllow? [y/N] ",
-			t.Name(), t.Description(), truncate(args, 200))
-		if !scanner.Scan() {
-			return false, nil
-		}
-		switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
-		case "y", "yes":
-			return true, nil
-		default:
-			return false, nil
+		for {
+			printApprovalPrompt()
+			if !scanner.Scan() {
+				return false, nil
+			}
+			switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+			case "y", "yes":
+				finishApprovalPrompt("\033[32mapproved\033[0m")
+				return true, nil
+			case "v", "view":
+				finishApprovalPrompt("\033[36mview args\033[0m")
+				printToolArgs(args)
+			default:
+				finishApprovalPrompt("\033[31mrejected\033[0m")
+				return false, nil
+			}
 		}
 	}
+}
+
+func printApprovalPrompt() {
+	fmt.Print("\033[90m╰─\033[0m Allow? \033[1m[y/n/v]\033[0m \033[90mdefault n\033[0m ")
+}
+
+func finishApprovalPrompt(status string) {
+	fmt.Printf("\033[1A\r\033[2K\033[90m╰─\033[0m %s\n", status)
+}
+
+func printToolArgs(args string) {
+	fmt.Println("\033[90m╭─ args\033[0m")
+	for _, line := range strings.Split(formatToolArgs(args), "\n") {
+		fmt.Printf("\033[90m│\033[0m  %s\n", line)
+	}
+	fmt.Println("\033[90m╰─\033[0m")
+}
+
+func formatToolArgs(args string) string {
+	var out bytes.Buffer
+	if err := json.Indent(&out, []byte(args), "", "  "); err == nil {
+		return out.String()
+	}
+	return args
 }
 
 type repl struct {

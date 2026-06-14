@@ -70,6 +70,9 @@ func TestApprovalDeniedToolIsNotExecuted(t *testing.T) {
 	if ran {
 		t.Fatal("denied tool must not execute")
 	}
+	if !hasPartial(events, session.EventToolApproval) {
+		t.Fatal("expected streamed tool approval event")
+	}
 	if got := toolResultContent(events); !strings.Contains(got, "rejected") {
 		t.Fatalf("rejection should be fed back as the tool result, got %q", got)
 	}
@@ -125,6 +128,9 @@ func TestApprovalSkippedForReadOnlyTool(t *testing.T) {
 
 	if asked {
 		t.Fatal("read-only tools must not be gated by the approver")
+	}
+	if hasPartial(events, session.EventToolApproval) {
+		t.Fatal("read-only tool should not emit an approval event")
 	}
 	if got := toolResultContent(events); got != "hi" {
 		t.Fatalf("read-only tool should have run, got result %q", got)

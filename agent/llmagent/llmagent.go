@@ -106,7 +106,7 @@ func (a *llmAgent) run(ctx context.Context, ictx *agent.InvocationContext, emit 
 		// Run each requested tool and feed the results back as Tool messages,
 		// then loop so the model can use them to produce its next turn.
 		for _, tc := range reply.ToolCalls {
-			result := a.execTool(ctx, ictx, tc)
+			result := a.execTool(ctx, ictx, tc, emit)
 			messages = append(messages, llm.Message{
 				Role:       llm.Tool,
 				Content:    result,
@@ -163,12 +163,15 @@ func buildToolNotes(tools []tool.Tool) string {
 // the model can see and recover from them. Non-read-only tools are gated by the
 // approver first, and a rejection is likewise returned as text so the model can
 // adapt rather than the whole turn aborting.
-func (a *llmAgent) execTool(ctx context.Context, ictx *agent.InvocationContext, tc llm.ToolCall) string {
+func (a *llmAgent) execTool(ctx context.Context, ictx *agent.InvocationContext, tc llm.ToolCall, emit func(*session.Event) bool) string {
 	t, ok := a.registry.Get(tc.Name)
 	if !ok {
 		return fmt.Sprintf("error: unknown tool %q", tc.Name)
 	}
 	if !t.ReadOnly() && a.approve != nil {
+		if emit != nil && !emit(a.toolApprovalEvent(ictx, tc)) {
+			return "error: event stream stopped before tool approval"
+		}
 		ok, err := a.approve(t, tc.Arguments)
 		if err != nil {
 			return "error: " + err.Error()
@@ -246,6 +249,24 @@ func (a *llmAgent) toolResultEvent(ictx *agent.InvocationContext, tc llm.ToolCal
 			Name:       tc.Name,
 			ToolCallID: tc.ID,
 			Content:    result,
+		},
+	}
+}
+
+func (a *llmAgent) toolApprovalEvent(ictx *agent.InvocationContext, tc llm.ToolCall) *session.Event {
+	return &session.Event{
+		InvocationID: ictx.InvocationID,
+		SessionID:    ictx.Session.ID,
+		Type:         session.EventToolApproval,
+		Author:       tc.Name,
+		Partial:      true,
+		Message: session.Message{
+			Role: session.RoleAssistant,
+			ToolCalls: []session.ToolCall{{
+				ID:        tc.ID,
+				Name:      tc.Name,
+				Arguments: tc.Arguments,
+			}},
 		},
 	}
 }

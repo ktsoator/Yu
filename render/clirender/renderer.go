@@ -37,12 +37,13 @@ func (r *Renderer) OnEvent(ev *session.Event) {
 		for _, tc := range ev.Message.ToolCalls {
 			r.toolProgress(tc.ID, tc.Name, r.summarize(tc.Name, tc.Arguments))
 		}
+	case session.EventToolApproval:
+		for _, tc := range ev.Message.ToolCalls {
+			r.toolApproval(tc.Name, r.summarize(tc.Name, tc.Arguments))
+		}
 	case session.EventMessage:
 		if ev.Message.Role != session.RoleAssistant {
 			return
-		}
-		if len(ev.Message.ToolCalls) > 0 {
-			r.closeToolProgress()
 		}
 		for _, tc := range ev.Message.ToolCalls {
 			if r.streamedToolCalls[tc.ID] {
@@ -50,6 +51,8 @@ func (r *Renderer) OnEvent(ev *session.Event) {
 			}
 			r.tool(tc.Name, r.summarize(tc.Name, tc.Arguments))
 		}
+	case session.EventToolResult:
+		r.toolResult(ev.Message.Content)
 	case session.EventError:
 		r.err(ev.Error)
 	}
@@ -80,10 +83,33 @@ func (r *Renderer) toolProgress(id, name, args string) {
 	r.inContent = false
 }
 
+func (r *Renderer) toolApproval(name, args string) {
+	r.closeReasoning(false)
+	if r.lineOpen {
+		fmt.Println()
+		r.lineOpen = false
+	}
+	if r.toolProgressOpen {
+		fmt.Print("\r\033[2K")
+		r.toolProgressOpen = false
+	}
+	fmt.Printf("\033[90m╭─\033[0m \033[33mapprove\033[0m \033[1m%s\033[0m\n", name)
+	if args != "" {
+		fmt.Printf("\033[90m│\033[0m  %s\n", args)
+	}
+	r.inContent = false
+}
+
 func (r *Renderer) tool(name, args string) {
 	r.closeReasoning(false)
 	r.newlineIfOpen()
 	fmt.Println(formatToolNotice(name, args))
+	r.inContent = false
+}
+
+func (r *Renderer) toolResult(result string) {
+	r.newlineIfOpen()
+	fmt.Printf("\033[90m  → %s\033[0m\n", summarizeResult(result))
 	r.inContent = false
 }
 
@@ -158,19 +184,34 @@ func (r *Renderer) summarize(name, args string) string {
 			return s
 		}
 	}
-	return summarizeArgs(args)
+	return SummarizeArgs(args)
 }
 
-// summarizeArgs renders tool arguments compactly for the activity note. It
-// reads from possibly-incomplete streamed JSON, surfacing whichever common
-// display key is present: a file path, a shell command, or a search pattern.
-func summarizeArgs(args string) string {
+// SummarizeArgs renders tool arguments compactly for an activity note or an
+// approval prompt. It reads from possibly-incomplete streamed JSON, surfacing
+// whichever common display key is present: a file path, a shell command, or a
+// search pattern.
+func SummarizeArgs(args string) string {
 	for _, key := range []string{"path", "command", "pattern"} {
 		if v := gjson.Get(args, key); v.Exists() {
 			return truncate(v.String(), 80)
 		}
 	}
 	return ""
+}
+
+// summarizeResult renders a tool result for the activity line: a short result
+// (including an error) is shown verbatim; a multi-line result is reduced to its
+// line count so the terminal isn't flooded with tool output.
+func summarizeResult(result string) string {
+	result = strings.TrimRight(result, "\n")
+	if result == "" {
+		return "(no output)"
+	}
+	if !strings.Contains(result, "\n") {
+		return truncate(result, 80)
+	}
+	return fmt.Sprintf("%d lines", strings.Count(result, "\n")+1)
 }
 
 func truncate(s string, max int) string {

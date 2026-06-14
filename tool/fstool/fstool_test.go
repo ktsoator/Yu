@@ -115,6 +115,18 @@ func TestWriteFileWithinWorkDir(t *testing.T) {
 	}
 }
 
+func TestWriteFileSummary(t *testing.T) {
+	tl := NewWriteFile()
+	s, ok := tl.(tool.Summarizer)
+	if !ok {
+		t.Fatal("write_file should implement tool.Summarizer")
+	}
+	got := s.Summary(`{"path":"a.go","content":"package main\n\nfunc main() {}\n"}`)
+	if got != "a.go · 3 lines" {
+		t.Fatalf("summary = %q", got)
+	}
+}
+
 func TestWriteFileRejectsEscape(t *testing.T) {
 	dir := t.TempDir()
 	for _, p := range []string{"../escape.txt", "/etc/passwd", "sub/../../escape.txt"} {
@@ -156,6 +168,18 @@ func TestEditFileReplaceAll(t *testing.T) {
 	}
 	if !strings.Contains(out, "3 occurrence") {
 		t.Fatalf("summary = %q, want 3 occurrences", out)
+	}
+}
+
+func TestEditFileSummary(t *testing.T) {
+	tl := NewEditFile()
+	s, ok := tl.(tool.Summarizer)
+	if !ok {
+		t.Fatal("edit_file should implement tool.Summarizer")
+	}
+	got := s.Summary(`{"path":"a.go","old_string":"one\ntwo\n","new_string":"one\nthree\nfour\n"}`)
+	if got != "a.go · replace 1 block · +3 -2 lines" {
+		t.Fatalf("summary = %q", got)
 	}
 }
 
