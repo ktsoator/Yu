@@ -10,7 +10,7 @@ import (
 )
 
 type applyPatchArgs struct {
-	Patch string `json:"patch" description:"Patch text using Begin Patch / Add File / Update File / Delete File blocks."`
+	Patch string `json:"patch" description:"Patch text. Must start with *** Begin Patch, use *** Add File: path / *** Update File: path / *** Delete File: path, and end with *** End Patch."`
 }
 
 type patchOp struct {
@@ -31,9 +31,9 @@ type patchLine struct {
 func NewApplyPatch() tool.Tool {
 	t, err := tool.NewFunction(tool.FunctionConfig{
 		Name:        "apply_patch",
-		Description: "Apply a Begin Patch style patch to one or more files.",
+		Description: "Apply a structured patch to one or more files. The patch must use *** Begin Patch / *** Update File: path / @@ / +/- lines / *** End Patch syntax.",
 		ReadOnly:    false,
-		Prompt:      "Use apply_patch for multi-line edits, repeated edits, or changes spanning multiple files. Use edit_file for small exact replacements and write_file for creating or replacing a whole file.",
+		Prompt:      "Use apply_patch for multi-line edits, repeated edits, or changes spanning multiple files. The patch string must begin with exactly '*** Begin Patch'. File operation headers must include the leading stars: '*** Update File: path', '*** Add File: path', or '*** Delete File: path'. Update hunks should start with '@@' followed by context lines prefixed with a space, removed lines prefixed with '-', and added lines prefixed with '+'. End with exactly '*** End Patch'. Use edit_file for small exact replacements and write_file for creating or replacing a whole file.",
 		Summary:     applyPatchSummary,
 	}, applyPatch)
 	if err != nil {
@@ -160,6 +160,9 @@ func parsePatch(patch string) ([]patchOp, error) {
 			ops = append(ops, patchOp{kind: "delete", path: path})
 			i++
 		default:
+			if strings.HasPrefix(line, "Update File: ") || strings.HasPrefix(line, "Add File: ") || strings.HasPrefix(line, "Delete File: ") {
+				return nil, fmt.Errorf("patch operation headers must include leading stars, e.g. *** %s", line)
+			}
 			return nil, fmt.Errorf("unexpected patch line: %s", lines[i])
 		}
 	}

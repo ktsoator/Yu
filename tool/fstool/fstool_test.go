@@ -284,6 +284,23 @@ func TestApplyPatchRejectsEscape(t *testing.T) {
 	}
 }
 
+func TestApplyPatchExplainsMissingHeaderStars(t *testing.T) {
+	patch := `*** Begin Patch
+Update File: a.txt
+@@
+-old
++new
+*** End Patch`
+
+	_, err := parsePatch(patch)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "*** Update File: a.txt") {
+		t.Fatalf("error should show the starred header syntax, got %v", err)
+	}
+}
+
 func TestApplyPatchSummary(t *testing.T) {
 	tl := NewApplyPatch()
 	s, ok := tl.(tool.Summarizer)
