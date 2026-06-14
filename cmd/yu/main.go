@@ -78,6 +78,8 @@ func run(ctx context.Context) error {
 	tools := []tool.Tool{
 		fstool.NewReadFile(),
 		fstool.NewListDir(),
+		fstool.NewGrep(),
+		fstool.NewGlob(),
 	}
 	ag, err := llmagent.New(agent.Config{
 		Name:        appName,

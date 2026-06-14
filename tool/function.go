@@ -15,7 +15,7 @@ type FunctionConfig struct {
 	InputSchema map[string]any
 	// ReadOnly marks tools that only observe state (read_file, list_dir, grep).
 	// It defaults to false: a tool is assumed to write unless it says otherwise,
-	// matching Claude Code's "assume writes" default.
+	// so anything unclassified is treated conservatively.
 	ReadOnly bool
 }
 

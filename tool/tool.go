@@ -7,8 +7,8 @@ import (
 )
 
 // Tool is a capability the agent can advertise to the model and run locally.
-// Following the Claude Code design, a tool is one rich object: it describes
-// itself, classifies its own safety, and executes.
+// A tool is one rich object: it describes itself, classifies its own safety,
+// and executes.
 type Tool interface {
 	Name() string
 	Description() string
@@ -31,9 +31,9 @@ type Context struct {
 }
 
 // Result is what a tool produces. For now it is the model-facing text; it is
-// kept as a struct so richer projections (a separate user-facing display, like
-// Claude Code's renderToolResultMessage) can land here without changing the
-// Tool interface.
+// kept as a struct so richer projections (e.g. a separate user-facing display
+// distinct from the model-facing text) can land here without changing the Tool
+// interface.
 type Result struct {
 	Content string `json:"content,omitempty"`
 }
