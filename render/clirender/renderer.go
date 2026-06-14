@@ -1,11 +1,11 @@
 package clirender
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/ktsoator/yu/session"
+	"github.com/tidwall/gjson"
 )
 
 type Renderer struct {
@@ -31,7 +31,7 @@ func (r *Renderer) OnEvent(ev *session.Event) {
 		r.content(ev.Message.Content)
 	case session.EventToolCall:
 		for _, tc := range ev.Message.ToolCalls {
-			r.toolProgress(tc.ID, tc.Name, firstNonEmpty(ev.Message.Content, summarizeArgs(tc.Arguments)))
+			r.toolProgress(tc.ID, tc.Name, summarizeArgs(tc.Arguments))
 		}
 	case session.EventMessage:
 		if ev.Message.Role != session.RoleAssistant {
@@ -146,24 +146,22 @@ func formatToolNotice(name, args string) string {
 	return fmt.Sprintf("\033[90m↳ \033[36mtool\033[90m \033[1;36m%s\033[90m %s\033[0m", name, args)
 }
 
-// summarizeArgs renders tool arguments compactly for the activity note,
-// preferring a single "path" value when present.
+// summarizeArgs renders tool arguments compactly for the activity note. It
+// reads from possibly-incomplete streamed JSON, surfacing whichever common
+// display key is present: a file path, a shell command, or a search pattern.
 func summarizeArgs(args string) string {
-	var m map[string]any
-	if err := json.Unmarshal([]byte(args), &m); err != nil {
-		return ""
-	}
-	if p, ok := m["path"].(string); ok {
-		return p
-	}
-	return args
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
+	for _, key := range []string{"path", "command", "pattern"} {
+		if v := gjson.Get(args, key); v.Exists() {
+			return truncate(v.String(), 80)
 		}
 	}
 	return ""
+}
+
+func truncate(s string, max int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-1] + "…"
 }

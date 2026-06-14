@@ -185,8 +185,7 @@ func (a *llmAgent) partialEvent(ictx *agent.InvocationContext, ev llm.Event) *se
 	case llm.EventToolCall:
 		out.Type = session.EventToolCall
 		out.Message = session.Message{
-			Role:    session.RoleAssistant,
-			Content: ev.Text,
+			Role: session.RoleAssistant,
 			ToolCalls: []session.ToolCall{{
 				ID:        ev.ToolCallID,
 				Name:      ev.ToolName,
