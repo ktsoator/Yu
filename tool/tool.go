@@ -6,16 +6,16 @@ import (
 	"fmt"
 )
 
-// Tool describes a capability that can be advertised to the model.
+// Tool is a capability the agent can advertise to the model and run locally.
+// Following the Claude Code design, a tool is one rich object: it describes
+// itself, classifies its own safety, and executes.
 type Tool interface {
 	Name() string
 	Description() string
 	Schema() map[string]any
-}
-
-// Executable is a Tool that can be invoked locally by the agent loop.
-type Executable interface {
-	Tool
+	// ReadOnly reports whether the tool only observes state. Read-only tools
+	// can be auto-approved; non-read-only tools are where confirmation hangs.
+	ReadOnly() bool
 	Execute(ctx Context, args json.RawMessage) (Result, error)
 }
 
@@ -30,35 +30,25 @@ type Context struct {
 	WorkDir      string
 }
 
-// Result is the value a tool returns to the model.
+// Result is what a tool produces. For now it is the model-facing text; it is
+// kept as a struct so richer projections (a separate user-facing display, like
+// Claude Code's renderToolResultMessage) can land here without changing the
+// Tool interface.
 type Result struct {
-	Content string         `json:"content,omitempty"`
-	Data    map[string]any `json:"data,omitempty"`
+	Content string `json:"content,omitempty"`
 }
 
 // Text returns the model-facing representation of the result.
-func (r Result) Text() string {
-	if r.Content != "" {
-		return r.Content
-	}
-	if r.Data == nil {
-		return ""
-	}
-	data, err := json.Marshal(r.Data)
-	if err != nil {
-		return fmt.Sprintf("error: encode tool result: %v", err)
-	}
-	return string(data)
-}
+func (r Result) Text() string { return r.Content }
 
 // Registry maps tool names to tools for lookup during the agent loop.
 type Registry struct {
-	tools map[string]Executable
+	tools map[string]Tool
 }
 
 // NewRegistry indexes tools by name.
-func NewRegistry(tools []Executable) (*Registry, error) {
-	reg := &Registry{tools: make(map[string]Executable, len(tools))}
+func NewRegistry(tools []Tool) (*Registry, error) {
+	reg := &Registry{tools: make(map[string]Tool, len(tools))}
 	for _, t := range tools {
 		if t == nil {
 			return nil, fmt.Errorf("tool registry: nil tool")
@@ -76,7 +66,7 @@ func NewRegistry(tools []Executable) (*Registry, error) {
 }
 
 // Get returns the tool with the given name.
-func (r *Registry) Get(name string) (Executable, bool) {
+func (r *Registry) Get(name string) (Tool, bool) {
 	if r == nil {
 		return nil, false
 	}

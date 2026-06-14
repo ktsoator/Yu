@@ -13,14 +13,18 @@ type FunctionConfig struct {
 	Name        string
 	Description string
 	InputSchema map[string]any
+	// ReadOnly marks tools that only observe state (read_file, list_dir, grep).
+	// It defaults to false: a tool is assumed to write unless it says otherwise,
+	// matching Claude Code's "assume writes" default.
+	ReadOnly bool
 }
 
 // Func is the strongly typed shape accepted by NewFunction.
 type Func[TArgs, TResult any] func(Context, TArgs) (TResult, error)
 
-// NewFunction wraps a Go function as an executable tool. TArgs should be a
-// struct or map so Yu can advertise a JSON Schema for model-produced arguments.
-func NewFunction[TArgs, TResult any](cfg FunctionConfig, fn Func[TArgs, TResult]) (Executable, error) {
+// NewFunction wraps a Go function as a tool. TArgs should be a struct or map so
+// Yu can advertise a JSON Schema for model-produced arguments.
+func NewFunction[TArgs, TResult any](cfg FunctionConfig, fn Func[TArgs, TResult]) (Tool, error) {
 	if cfg.Name == "" {
 		return nil, fmt.Errorf("function tool name is required")
 	}
@@ -42,6 +46,7 @@ func NewFunction[TArgs, TResult any](cfg FunctionConfig, fn Func[TArgs, TResult]
 		name:        cfg.Name,
 		description: cfg.Description,
 		schema:      schema,
+		readOnly:    cfg.ReadOnly,
 		fn:          fn,
 	}, nil
 }
@@ -50,6 +55,7 @@ type functionTool[TArgs, TResult any] struct {
 	name        string
 	description string
 	schema      map[string]any
+	readOnly    bool
 	fn          Func[TArgs, TResult]
 }
 
@@ -58,6 +64,8 @@ func (t *functionTool[TArgs, TResult]) Name() string { return t.name }
 func (t *functionTool[TArgs, TResult]) Description() string { return t.description }
 
 func (t *functionTool[TArgs, TResult]) Schema() map[string]any { return cloneMap(t.schema) }
+
+func (t *functionTool[TArgs, TResult]) ReadOnly() bool { return t.readOnly }
 
 func (t *functionTool[TArgs, TResult]) Execute(ctx Context, args json.RawMessage) (result Result, err error) {
 	defer func() {
@@ -96,16 +104,11 @@ func resultFromValue(v any) (Result, error) {
 		return Result{Content: string(out)}, nil
 	case []byte:
 		return Result{Content: string(out)}, nil
-	case map[string]any:
-		return Result{Data: out}, nil
 	default:
+		// Any other return type is JSON-serialized into the model-facing text.
 		data, err := json.Marshal(out)
 		if err != nil {
 			return Result{}, fmt.Errorf("encode tool result: %w", err)
-		}
-		var m map[string]any
-		if err := json.Unmarshal(data, &m); err == nil {
-			return Result{Content: string(data), Data: m}, nil
 		}
 		return Result{Content: string(data)}, nil
 	}

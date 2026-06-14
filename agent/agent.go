@@ -16,7 +16,7 @@ type Config struct {
 	Description string
 	Instruction string
 	Model       llm.Model
-	Tools       []tool.Executable
+	Tools       []tool.Tool
 }
 
 // InvocationContext carries everything an agent needs for one invocation:

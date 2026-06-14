@@ -205,7 +205,7 @@ func (a *llmAgent) SupportsThinking() bool {
 	return ok && model.SupportsThinking()
 }
 
-func toolDefs(tools []tool.Executable) []llm.ToolDef {
+func toolDefs(tools []tool.Tool) []llm.ToolDef {
 	if len(tools) == 0 {
 		return nil
 	}

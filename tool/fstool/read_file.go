@@ -16,10 +16,11 @@ type readFileArgs struct {
 }
 
 // NewReadFile returns a tool that reads a single file from disk.
-func NewReadFile() tool.Executable {
+func NewReadFile() tool.Tool {
 	t, err := tool.NewFunction(tool.FunctionConfig{
 		Name:        "read_file",
 		Description: "Read the contents of a file at the given path.",
+		ReadOnly:    true,
 	}, readFile)
 	if err != nil {
 		panic(err)

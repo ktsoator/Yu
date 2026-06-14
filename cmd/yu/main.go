@@ -75,7 +75,7 @@ func run(ctx context.Context) error {
 	}
 	defer sessions.Close()
 
-	tools := []tool.Executable{
+	tools := []tool.Tool{
 		fstool.NewReadFile(),
 		fstool.NewListDir(),
 	}

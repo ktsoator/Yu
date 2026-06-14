@@ -12,10 +12,11 @@ type listDirArgs struct {
 }
 
 // NewListDir returns a tool that lists the entries of a directory.
-func NewListDir() tool.Executable {
+func NewListDir() tool.Tool {
 	t, err := tool.NewFunction(tool.FunctionConfig{
 		Name:        "list_dir",
 		Description: "List the files and subdirectories in a directory.",
+		ReadOnly:    true,
 	}, listDir)
 	if err != nil {
 		panic(err)
