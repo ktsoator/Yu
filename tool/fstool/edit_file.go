@@ -22,6 +22,7 @@ func NewEditFile() tool.Tool {
 		Name:        "edit_file",
 		Description: "Replace an exact string in an existing file. old_string must be unique unless replace_all is set.",
 		ReadOnly:    false,
+		Prompt:      "old_string must match the file exactly, including whitespace, and be unique; otherwise the edit fails. Set replace_all to change every occurrence.",
 	}, editFile)
 	if err != nil {
 		panic(err)

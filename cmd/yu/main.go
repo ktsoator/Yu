@@ -106,15 +106,34 @@ func run(ctx context.Context) error {
 		return err
 	}
 	repl := newREPL(replConfig{
-		Context:   ctx,
-		Scanner:   scanner,
-		Models:    models,
-		AppName:   appName,
-		UserID:    userID,
-		Agent:     ag,
-		Runner:    run,
-		Sessions:  sessions,
-		ModelName: model.Name(),
+		Context:     ctx,
+		Scanner:     scanner,
+		Models:      models,
+		AppName:     appName,
+		UserID:      userID,
+		Agent:       ag,
+		Runner:      run,
+		Sessions:    sessions,
+		ModelName:   model.Name(),
+		ToolSummary: toolSummarizer(tools),
 	})
 	return repl.run()
+}
+
+// toolSummarizer lets a tool render its own call for the activity line. It
+// returns "" when a tool has no custom rendering, so the renderer falls back to
+// its generic summary.
+func toolSummarizer(tools []tool.Tool) func(name, args string) string {
+	byName := make(map[string]tool.Tool, len(tools))
+	for _, t := range tools {
+		byName[t.Name()] = t
+	}
+	return func(name, args string) string {
+		if t, ok := byName[name]; ok {
+			if s, ok := t.(tool.Summarizer); ok {
+				return s.Summary(args)
+			}
+		}
+		return ""
+	}
 }

@@ -24,6 +24,30 @@ func TestSummarizeArgs(t *testing.T) {
 	}
 }
 
+func TestRendererSummarizePrefersToolThenFallsBack(t *testing.T) {
+	r := New(func(name, args string) string {
+		if name == "grep" {
+			return "func main in cmd/"
+		}
+		return ""
+	})
+
+	if got := r.summarize("grep", `{"pattern":"func main","path":"cmd/"}`); got != "func main in cmd/" {
+		t.Fatalf("tool summary not used: %q", got)
+	}
+	// read_file has no custom summary, so the generic path summary applies.
+	if got := r.summarize("read_file", `{"path":"a.go"}`); got != "a.go" {
+		t.Fatalf("fallback summary wrong: %q", got)
+	}
+}
+
+func TestRendererSummarizeNilToolSummary(t *testing.T) {
+	r := New(nil)
+	if got := r.summarize("read_file", `{"path":"a.go"}`); got != "a.go" {
+		t.Fatalf("nil summarizer should fall back, got %q", got)
+	}
+}
+
 func TestSummarizeArgsTruncatesLongValue(t *testing.T) {
 	in := `{"command":"` + strings.Repeat("a", 200) + `"}`
 	got := summarizeArgs(in)

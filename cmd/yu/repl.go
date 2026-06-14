@@ -54,22 +54,23 @@ type repl struct {
 }
 
 type replConfig struct {
-	Context   context.Context
-	Scanner   *bufio.Scanner
-	Models    []config.Model
-	AppName   string
-	UserID    string
-	Agent     agent.Agent
-	Runner    *runner.Runner
-	Sessions  session.Service
-	ModelName string
-	Renderer  func() render.Renderer
+	Context     context.Context
+	Scanner     *bufio.Scanner
+	Models      []config.Model
+	AppName     string
+	UserID      string
+	Agent       agent.Agent
+	Runner      *runner.Runner
+	Sessions    session.Service
+	ModelName   string
+	Renderer    func() render.Renderer
+	ToolSummary func(name, args string) string
 }
 
 func newREPL(cfg replConfig) *repl {
 	renderer := cfg.Renderer
 	if renderer == nil {
-		renderer = func() render.Renderer { return clirender.New() }
+		renderer = func() render.Renderer { return clirender.New(cfg.ToolSummary) }
 	}
 	return &repl{
 		ctx:              cfg.Context,

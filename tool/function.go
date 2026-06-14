@@ -17,6 +17,13 @@ type FunctionConfig struct {
 	// It defaults to false: a tool is assumed to write unless it says otherwise,
 	// so anything unclassified is treated conservatively.
 	ReadOnly bool
+	// Prompt is optional usage guidance added to the agent's system prompt,
+	// beyond the one-line Description sent in the request's tool definitions.
+	Prompt string
+	// Summary optionally renders the tool's (possibly partial, streamed) call
+	// arguments into a compact one-line activity note. Returning "" falls back
+	// to the generic summary.
+	Summary func(args string) string
 }
 
 // Func is the strongly typed shape accepted by NewFunction.
@@ -47,6 +54,8 @@ func NewFunction[TArgs, TResult any](cfg FunctionConfig, fn Func[TArgs, TResult]
 		description: cfg.Description,
 		schema:      schema,
 		readOnly:    cfg.ReadOnly,
+		prompt:      cfg.Prompt,
+		summary:     cfg.Summary,
 		fn:          fn,
 	}, nil
 }
@@ -56,6 +65,8 @@ type functionTool[TArgs, TResult any] struct {
 	description string
 	schema      map[string]any
 	readOnly    bool
+	prompt      string
+	summary     func(args string) string
 	fn          Func[TArgs, TResult]
 }
 
@@ -66,6 +77,15 @@ func (t *functionTool[TArgs, TResult]) Description() string { return t.descripti
 func (t *functionTool[TArgs, TResult]) Schema() map[string]any { return cloneMap(t.schema) }
 
 func (t *functionTool[TArgs, TResult]) ReadOnly() bool { return t.readOnly }
+
+func (t *functionTool[TArgs, TResult]) Prompt() string { return t.prompt }
+
+func (t *functionTool[TArgs, TResult]) Summary(args string) string {
+	if t.summary == nil {
+		return ""
+	}
+	return t.summary(args)
+}
 
 func (t *functionTool[TArgs, TResult]) Execute(ctx Context, args json.RawMessage) (result Result, err error) {
 	defer func() {

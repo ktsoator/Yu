@@ -19,6 +19,21 @@ type Tool interface {
 	Execute(ctx Context, args json.RawMessage) (Result, error)
 }
 
+// Prompter is an optional capability: a tool contributes usage guidance to the
+// agent's system prompt, beyond the one-line Description sent with the request's
+// tool definitions. Tools that need no extra guidance don't implement it.
+type Prompter interface {
+	Prompt() string
+}
+
+// Summarizer is an optional capability: a tool renders its own call arguments
+// into a compact one-line activity summary for the UI. The argument string may
+// be incomplete (streamed), so implementations must tolerate partial JSON.
+// Returning "" lets the caller fall back to a generic summary.
+type Summarizer interface {
+	Summary(args string) string
+}
+
 // Context carries invocation-scoped information into a tool execution.
 type Context struct {
 	context.Context

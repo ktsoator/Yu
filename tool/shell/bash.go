@@ -32,6 +32,7 @@ func NewBash() tool.Tool {
 		Name:        "bash",
 		Description: "Run a shell command and return its combined stdout and stderr.",
 		ReadOnly:    false,
+		Prompt:      "Runs via /bin/sh -c in the working directory. Prefer focused, non-interactive commands; it is not for long-running or interactive processes.",
 	}, runBash)
 	if err != nil {
 		panic(err)

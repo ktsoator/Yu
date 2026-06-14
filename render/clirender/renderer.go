@@ -9,6 +9,7 @@ import (
 )
 
 type Renderer struct {
+	toolSummary       func(name, args string) string
 	inReasoning       bool
 	inContent         bool
 	lineOpen          bool
@@ -16,8 +17,11 @@ type Renderer struct {
 	streamedToolCalls map[string]bool
 }
 
-func New() *Renderer {
-	return &Renderer{}
+// New builds a renderer. toolSummary optionally renders a tool call's arguments
+// (a tool describing its own call); when it returns "" or is nil, the renderer
+// falls back to its generic argument summary.
+func New(toolSummary func(name, args string) string) *Renderer {
+	return &Renderer{toolSummary: toolSummary}
 }
 
 // OnEvent renders one event. Partial deltas stream as they arrive; the
@@ -31,7 +35,7 @@ func (r *Renderer) OnEvent(ev *session.Event) {
 		r.content(ev.Message.Content)
 	case session.EventToolCall:
 		for _, tc := range ev.Message.ToolCalls {
-			r.toolProgress(tc.ID, tc.Name, summarizeArgs(tc.Arguments))
+			r.toolProgress(tc.ID, tc.Name, r.summarize(tc.Name, tc.Arguments))
 		}
 	case session.EventMessage:
 		if ev.Message.Role != session.RoleAssistant {
@@ -44,7 +48,7 @@ func (r *Renderer) OnEvent(ev *session.Event) {
 			if r.streamedToolCalls[tc.ID] {
 				continue
 			}
-			r.tool(tc.Name, summarizeArgs(tc.Arguments))
+			r.tool(tc.Name, r.summarize(tc.Name, tc.Arguments))
 		}
 	case session.EventError:
 		r.err(ev.Error)
@@ -144,6 +148,17 @@ func formatToolNotice(name, args string) string {
 		return fmt.Sprintf("\033[90m↳ \033[36mtool\033[90m \033[1;36m%s\033[0m", name)
 	}
 	return fmt.Sprintf("\033[90m↳ \033[36mtool\033[90m \033[1;36m%s\033[90m %s\033[0m", name, args)
+}
+
+// summarize prefers a tool's own rendering of its call and otherwise falls back
+// to the generic argument summary.
+func (r *Renderer) summarize(name, args string) string {
+	if r.toolSummary != nil {
+		if s := r.toolSummary(name, args); s != "" {
+			return s
+		}
+	}
+	return summarizeArgs(args)
 }
 
 // summarizeArgs renders tool arguments compactly for the activity note. It

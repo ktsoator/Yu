@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"os"
+	"strings"
 
 	"github.com/ktsoator/yu/agent"
 	"github.com/ktsoator/yu/llm"
@@ -33,6 +34,7 @@ type llmAgent struct {
 	toolDefs    []llm.ToolDef
 	approve     agent.ToolApprover
 	env         agent.Environment
+	toolNotes   string
 }
 
 func New(cfg agent.Config) (agent.Agent, error) {
@@ -59,6 +61,7 @@ func New(cfg agent.Config) (agent.Agent, error) {
 		toolDefs:    toolDefs(cfg.Tools),
 		approve:     cfg.Approve,
 		env:         cfg.Environment,
+		toolNotes:   buildToolNotes(cfg.Tools),
 	}, nil
 }
 
@@ -119,18 +122,41 @@ func (a *llmAgent) run(ctx context.Context, ictx *agent.InvocationContext, emit 
 }
 
 // systemPrompt composes the static instruction with the dynamic environment
-// block, evaluated once per invocation. The working directory matches the one
-// tools see, so the model and its tools agree on where they are.
+// block and any per-tool guidance, evaluated once per invocation. The working
+// directory matches the one tools see, so the model and its tools agree on
+// where they are.
 func (a *llmAgent) systemPrompt() string {
-	if a.env == nil {
-		return a.instruction
+	parts := []string{a.instruction}
+	if a.env != nil {
+		wd, _ := os.Getwd()
+		if block := a.env(wd); block != "" {
+			parts = append(parts, block)
+		}
 	}
-	wd, _ := os.Getwd()
-	block := a.env(wd)
-	if block == "" {
-		return a.instruction
+	if a.toolNotes != "" {
+		parts = append(parts, a.toolNotes)
 	}
-	return a.instruction + "\n\n" + block
+	return strings.Join(parts, "\n\n")
+}
+
+// buildToolNotes gathers per-tool usage guidance from tools that opt in via the
+// Prompter capability, sourcing each name from the tool itself so the prompt
+// can't drift from the registry.
+func buildToolNotes(tools []tool.Tool) string {
+	var lines []string
+	for _, t := range tools {
+		p, ok := t.(tool.Prompter)
+		if !ok {
+			continue
+		}
+		if note := strings.TrimSpace(p.Prompt()); note != "" {
+			lines = append(lines, fmt.Sprintf("- %s: %s", t.Name(), note))
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "# Tool notes\n" + strings.Join(lines, "\n")
 }
 
 // execTool executes a single tool call. Tool errors are returned as text so

@@ -7,6 +7,7 @@ import (
 
 	"github.com/ktsoator/yu/agent"
 	"github.com/ktsoator/yu/llm"
+	"github.com/ktsoator/yu/tool"
 )
 
 func TestRunInjectsEnvironmentContext(t *testing.T) {
@@ -32,6 +33,35 @@ func TestRunInjectsEnvironmentContext(t *testing.T) {
 	}
 	if !strings.Contains(sys.Content, "<env>TEST</env>") {
 		t.Fatalf("system prompt missing env block: %q", sys.Content)
+	}
+}
+
+func TestRunAppendsToolNotes(t *testing.T) {
+	noter, err := tool.NewFunction(tool.FunctionConfig{
+		Name:        "noter",
+		Description: "does a thing",
+		Prompt:      "use me carefully",
+	}, func(tool.Context, struct{}) (string, error) { return "", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	model := &fakeModel{replies: []llm.Message{{Role: llm.Assistant, Content: "ok"}}}
+	ag, err := New(agent.Config{
+		Name:        "yu",
+		Model:       model,
+		Instruction: "be useful",
+		Tools:       []tool.Tool{noter},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	collect(t, ag.Run(context.Background(), testICtx(userEvent("hi"))))
+
+	sys := model.seen[0][0].Content
+	if !strings.Contains(sys, "# Tool notes") || !strings.Contains(sys, "- noter: use me carefully") {
+		t.Fatalf("system prompt missing tool notes:\n%s", sys)
 	}
 }
 

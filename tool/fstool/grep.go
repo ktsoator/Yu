@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/ktsoator/yu/tool"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -31,6 +32,16 @@ func NewGrep() tool.Tool {
 		Name:        "grep",
 		Description: "Search file contents for a regular expression. Returns matching lines as path:line: text.",
 		ReadOnly:    true,
+		Summary: func(args string) string {
+			pattern := gjson.Get(args, "pattern").String()
+			if pattern == "" {
+				return ""
+			}
+			if path := gjson.Get(args, "path").String(); path != "" {
+				return pattern + " in " + path
+			}
+			return pattern
+		},
 	}, grep)
 	if err != nil {
 		panic(err)
