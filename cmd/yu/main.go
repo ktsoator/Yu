@@ -15,6 +15,7 @@ import (
 	sessiondatabase "github.com/ktsoator/yu/session/database"
 	"github.com/ktsoator/yu/tool"
 	"github.com/ktsoator/yu/tool/fstool"
+	"github.com/ktsoator/yu/tool/shell"
 )
 
 const (
@@ -81,12 +82,14 @@ func run(ctx context.Context) error {
 		fstool.NewGrep(),
 		fstool.NewGlob(),
 		fstool.NewWriteFile(),
+		fstool.NewEditFile(),
+		shell.NewBash(),
 	}
 	ag, err := llmagent.New(agent.Config{
 		Name:        appName,
 		Model:       model,
 		Description: "A concise coding assistant in a terminal.",
-		Instruction: "You are a coding assistant in a terminal. Be concise. Use the available tools to read, search, and modify files when it helps answer the user.",
+		Instruction: "You are a coding assistant in a terminal. Be concise. Use the available tools to read, search, modify files, and run shell commands when it helps answer the user.",
 		Tools:       tools,
 		Approve:     confirmTool(scanner),
 	})
