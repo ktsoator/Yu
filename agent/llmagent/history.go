@@ -17,6 +17,51 @@ func toLLMMessages(instruction string, events []session.Event) []llm.Message {
 		}
 		out = append(out, toLLMMessage(ev.Message))
 	}
+	return repairToolResults(out)
+}
+
+// missingToolResult is the placeholder spliced in for a tool call that history
+// never answered. It is marked clearly as an interruption so the model treats
+// it as a failed step rather than real tool output.
+const missingToolResult = "error: tool result missing (the previous turn was interrupted before this tool finished)"
+
+// repairToolResults enforces the core agent-loop invariant: every assistant
+// tool call must be answered by a tool result before the next turn, or the next
+// model request is rejected ("tool_call_ids did not have response messages").
+//
+// History is persisted event-by-event, not atomically per turn, so it can be
+// torn mid-turn — a cancel, a failed append, or a crash between persisting the
+// assistant message and its tool results. For any dangling call we splice a
+// synthetic error result in right after the assistant message, mirroring Claude
+// Code's yieldMissingToolResultBlocks.
+func repairToolResults(msgs []llm.Message) []llm.Message {
+	answered := make(map[string]bool)
+	for _, m := range msgs {
+		if m.Role == llm.Tool && m.ToolCallID != "" {
+			answered[m.ToolCallID] = true
+		}
+	}
+
+	out := make([]llm.Message, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, m)
+		if m.Role != llm.Assistant {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			if tc.ID == "" || answered[tc.ID] {
+				continue
+			}
+			out = append(out, llm.Message{
+				Role:       llm.Tool,
+				ToolCallID: tc.ID,
+				Content:    missingToolResult,
+			})
+			// Mark answered so a real result later in history isn't duplicated,
+			// and a repeated call id can't be patched twice.
+			answered[tc.ID] = true
+		}
+	}
 	return out
 }
 
