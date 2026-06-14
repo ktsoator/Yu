@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,14 +99,22 @@ func (c *Client) Chat(ctx context.Context, messages []llm.Message, tools []llm.T
 		raw := chunk.RawJSON()
 
 		var deltaContent string
+		var toolEvents []llm.Event
 		if len(chunk.Choices) > 0 {
 			deltaContent = chunk.Choices[0].Delta.Content
-			calls.add(chunk.Choices[0].Delta.ToolCalls)
+			toolEvents = calls.add(chunk.Choices[0].Delta.ToolCalls)
 		}
 		// Reasoning is vendor-specific and not exposed by the typed SDK delta, so
 		// read it from raw JSON through the configured path.
 		deltaReasoning := gjson.Get(raw, c.reasoningPath).String()
 
+		if onEvent != nil {
+			for _, ev := range toolEvents {
+				if !onEvent(ev) {
+					return llm.Message{}, llm.ErrEventStreamStopped
+				}
+			}
+		}
 		if deltaContent == "" && deltaReasoning == "" {
 			continue
 		}
@@ -138,15 +147,20 @@ func (c *Client) Chat(ctx context.Context, messages []llm.Message, tools []llm.T
 
 // toolCallAccumulator reassembles streamed tool-call fragments by index.
 type toolCallAccumulator struct {
-	order []int64
-	calls map[int64]*llm.ToolCall
+	order  []int64
+	calls  map[int64]*llm.ToolCall
+	status map[int64]string
 }
 
 func newToolCallAccumulator() *toolCallAccumulator {
-	return &toolCallAccumulator{calls: map[int64]*llm.ToolCall{}}
+	return &toolCallAccumulator{
+		calls:  map[int64]*llm.ToolCall{},
+		status: map[int64]string{},
+	}
 }
 
-func (a *toolCallAccumulator) add(deltas []oai.ChatCompletionChunkChoiceDeltaToolCall) {
+func (a *toolCallAccumulator) add(deltas []oai.ChatCompletionChunkChoiceDeltaToolCall) []llm.Event {
+	var events []llm.Event
 	for _, d := range deltas {
 		tc, ok := a.calls[d.Index]
 		if !ok {
@@ -154,6 +168,7 @@ func (a *toolCallAccumulator) add(deltas []oai.ChatCompletionChunkChoiceDeltaToo
 			a.calls[d.Index] = tc
 			a.order = append(a.order, d.Index)
 		}
+		hadName := tc.Name != ""
 		if d.ID != "" {
 			tc.ID = d.ID
 		}
@@ -161,7 +176,19 @@ func (a *toolCallAccumulator) add(deltas []oai.ChatCompletionChunkChoiceDeltaToo
 			tc.Name = d.Function.Name
 		}
 		tc.Arguments += d.Function.Arguments
+		status := toolCallStatus(tc.Name, tc.Arguments)
+		if !hadName && tc.Name != "" || status != "" && status != a.status[d.Index] {
+			a.status[d.Index] = status
+			events = append(events, llm.Event{
+				Type:       llm.EventToolCall,
+				ToolCallID: tc.ID,
+				ToolName:   tc.Name,
+				ToolArgs:   tc.Arguments,
+				Text:       status,
+			})
+		}
 	}
+	return events
 }
 
 func (a *toolCallAccumulator) result() []llm.ToolCall {
@@ -173,6 +200,143 @@ func (a *toolCallAccumulator) result() []llm.ToolCall {
 		out = append(out, *a.calls[idx])
 	}
 	return out
+}
+
+func toolCallStatus(name, args string) string {
+	path := jsonStringValue(args, "path")
+	var lines int
+	switch name {
+	case "write_file":
+		lines = jsonStringLineCount(args, "content")
+	case "edit_file":
+		lines = jsonStringLineCount(args, "new_string")
+	}
+	switch {
+	case path != "" && lines > 0:
+		return fmt.Sprintf("%s %d %s", path, lines, lineWord(lines))
+	case path != "":
+		return path
+	case lines > 0:
+		return fmt.Sprintf("%d %s", lines, lineWord(lines))
+	default:
+		return ""
+	}
+}
+
+func jsonStringValue(raw, field string) string {
+	if value, ok := completeJSONStringValue(raw, field); ok {
+		return value
+	}
+	value, _ := partialJSONStringValue(raw, field)
+	return value
+}
+
+func jsonStringLineCount(raw, field string) int {
+	if value, ok := completeJSONStringValue(raw, field); ok {
+		return countLines(value)
+	}
+	value, ok := partialJSONStringValue(raw, field)
+	if !ok || value == "" {
+		return 0
+	}
+	return countEncodedLines(value)
+}
+
+func completeJSONStringValue(raw, field string) (string, bool) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return "", false
+	}
+	var value string
+	if err := json.Unmarshal(m[field], &value); err != nil {
+		return "", false
+	}
+	return value, true
+}
+
+func partialJSONStringValue(raw, field string) (string, bool) {
+	key := `"` + field + `"`
+	i := strings.Index(raw, key)
+	if i < 0 {
+		return "", false
+	}
+	i += len(key)
+	for i < len(raw) && (raw[i] == ' ' || raw[i] == '\n' || raw[i] == '\r' || raw[i] == '\t') {
+		i++
+	}
+	if i >= len(raw) || raw[i] != ':' {
+		return "", false
+	}
+	i++
+	for i < len(raw) && (raw[i] == ' ' || raw[i] == '\n' || raw[i] == '\r' || raw[i] == '\t') {
+		i++
+	}
+	if i >= len(raw) || raw[i] != '"' {
+		return "", false
+	}
+	i++
+	var b strings.Builder
+	escaped := false
+	for ; i < len(raw); i++ {
+		c := raw[i]
+		if escaped {
+			b.WriteByte('\\')
+			b.WriteByte(c)
+			escaped = false
+			continue
+		}
+		switch c {
+		case '\\':
+			escaped = true
+		case '"':
+			return b.String(), true
+		default:
+			b.WriteByte(c)
+		}
+	}
+	if escaped {
+		b.WriteByte('\\')
+	}
+	return b.String(), true
+}
+
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	lines := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		lines++
+	}
+	return lines
+}
+
+func countEncodedLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	lines := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && s[i+1] == 'n' {
+			lines++
+			i++
+			continue
+		}
+		if s[i] == '\n' {
+			lines++
+		}
+	}
+	if !strings.HasSuffix(s, `\n`) && !strings.HasSuffix(s, "\n") {
+		lines++
+	}
+	return lines
+}
+
+func lineWord(n int) string {
+	if n == 1 {
+		return "line"
+	}
+	return "lines"
 }
 
 const debugLogPath = "/tmp/yu-debug.log"

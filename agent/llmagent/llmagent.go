@@ -182,6 +182,17 @@ func (a *llmAgent) partialEvent(ictx *agent.InvocationContext, ev llm.Event) *se
 	case llm.EventReasoningDelta:
 		out.Type = session.EventReasoningDelta
 		out.Message = session.Message{Role: session.RoleAssistant, Reasoning: ev.Text}
+	case llm.EventToolCall:
+		out.Type = session.EventToolCall
+		out.Message = session.Message{
+			Role:    session.RoleAssistant,
+			Content: ev.Text,
+			ToolCalls: []session.ToolCall{{
+				ID:        ev.ToolCallID,
+				Name:      ev.ToolName,
+				Arguments: ev.ToolArgs,
+			}},
+		}
 	default:
 		out.Type = session.EventContentDelta
 		out.Message = session.Message{Role: session.RoleAssistant, Content: ev.Text}

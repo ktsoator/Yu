@@ -51,10 +51,11 @@ const (
 
 // Event is one incremental model/agent event for the UI to render.
 type Event struct {
-	Type     EventType
-	Text     string
-	ToolName string
-	ToolArgs string
+	Type       EventType
+	Text       string
+	ToolCallID string
+	ToolName   string
+	ToolArgs   string
 }
 
 // ErrEventStreamStopped is returned internally when an event consumer stops

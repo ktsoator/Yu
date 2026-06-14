@@ -13,10 +13,12 @@ const (
 	// EventError records a failed invocation step.
 	EventError EventType = "error"
 
-	// EventContentDelta and EventReasoningDelta are streaming fragments of an
-	// assistant message. They are always Partial and never persisted.
+	// EventContentDelta, EventReasoningDelta, and EventToolCall are streaming
+	// fragments of an assistant turn. They are always Partial and never
+	// persisted.
 	EventContentDelta   EventType = "content.delta"
 	EventReasoningDelta EventType = "reasoning.delta"
+	EventToolCall       EventType = "tool.call"
 )
 
 // Event is the unit of session history: everything that happens during an

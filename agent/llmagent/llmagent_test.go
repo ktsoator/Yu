@@ -14,6 +14,7 @@ import (
 
 type fakeModel struct {
 	replies []llm.Message
+	events  []llm.Event
 	seen    [][]llm.Message
 }
 
@@ -23,9 +24,17 @@ func (m *fakeModel) Chat(_ context.Context, messages []llm.Message, _ []llm.Tool
 	m.seen = append(m.seen, append([]llm.Message(nil), messages...))
 	reply := m.replies[0]
 	m.replies = m.replies[1:]
-	if onEvent != nil && reply.Content != "" {
-		if !onEvent(llm.Event{Type: llm.EventContentDelta, Text: reply.Content}) {
-			return llm.Message{}, llm.ErrEventStreamStopped
+	if onEvent != nil {
+		for _, ev := range m.events {
+			if !onEvent(ev) {
+				return llm.Message{}, llm.ErrEventStreamStopped
+			}
+		}
+		m.events = nil
+		if reply.Content != "" {
+			if !onEvent(llm.Event{Type: llm.EventContentDelta, Text: reply.Content}) {
+				return llm.Message{}, llm.ErrEventStreamStopped
+			}
 		}
 	}
 	return reply, nil
@@ -175,6 +184,57 @@ func TestRunToolRoundTrip(t *testing.T) {
 	secondCall := model.seen[1]
 	if secondCall[len(secondCall)-1].Role != llm.Tool {
 		t.Fatalf("expected second model call to include tool result, got %+v", secondCall)
+	}
+}
+
+func TestRunStreamsToolCallEvent(t *testing.T) {
+	model := &fakeModel{
+		events: []llm.Event{{
+			Type:       llm.EventToolCall,
+			ToolCallID: "call-1",
+			ToolName:   "echo",
+			ToolArgs:   `{"value":"from tool"}`,
+		}},
+		replies: []llm.Message{
+			{
+				Role: llm.Assistant,
+				ToolCalls: []llm.ToolCall{{
+					ID:        "call-1",
+					Name:      "echo",
+					Arguments: `{"value":"from tool"}`,
+				}},
+			},
+			{Role: llm.Assistant, Content: "done"},
+		},
+	}
+	ag, err := New(agent.Config{
+		Name:        "yu",
+		Model:       model,
+		Instruction: "be useful",
+		Tools:       []tool.Tool{fakeTool{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := collect(t, ag.Run(context.Background(), testICtx(userEvent("use tool"))))
+
+	var got *session.Event
+	for _, ev := range events {
+		if ev.Partial && ev.Type == session.EventToolCall {
+			got = ev
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("expected streamed tool call event")
+	}
+	if len(got.Message.ToolCalls) != 1 {
+		t.Fatalf("expected one streamed tool call, got %+v", got.Message.ToolCalls)
+	}
+	tc := got.Message.ToolCalls[0]
+	if tc.ID != "call-1" || tc.Name != "echo" || tc.Arguments != `{"value":"from tool"}` {
+		t.Fatalf("unexpected streamed tool call: %+v", tc)
 	}
 }
 

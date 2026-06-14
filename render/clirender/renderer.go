@@ -9,9 +9,11 @@ import (
 )
 
 type Renderer struct {
-	inReasoning bool
-	inContent   bool
-	lineOpen    bool
+	inReasoning       bool
+	inContent         bool
+	lineOpen          bool
+	toolProgressOpen  bool
+	streamedToolCalls map[string]bool
 }
 
 func New() *Renderer {
@@ -27,11 +29,21 @@ func (r *Renderer) OnEvent(ev *session.Event) {
 		r.reasoning(ev.Message.Reasoning)
 	case session.EventContentDelta:
 		r.content(ev.Message.Content)
+	case session.EventToolCall:
+		for _, tc := range ev.Message.ToolCalls {
+			r.toolProgress(tc.ID, tc.Name, firstNonEmpty(ev.Message.Content, summarizeArgs(tc.Arguments)))
+		}
 	case session.EventMessage:
 		if ev.Message.Role != session.RoleAssistant {
 			return
 		}
+		if len(ev.Message.ToolCalls) > 0 {
+			r.closeToolProgress()
+		}
 		for _, tc := range ev.Message.ToolCalls {
+			if r.streamedToolCalls[tc.ID] {
+				continue
+			}
 			r.tool(tc.Name, summarizeArgs(tc.Arguments))
 		}
 	case session.EventError:
@@ -43,7 +55,25 @@ func (r *Renderer) Finish() {
 	if r.inReasoning && !r.inContent {
 		r.closeReasoning(false)
 	}
+	r.closeToolProgress()
 	fmt.Println()
+}
+
+func (r *Renderer) toolProgress(id, name, args string) {
+	r.closeReasoning(false)
+	if r.lineOpen {
+		fmt.Println()
+		r.lineOpen = false
+	}
+	if id != "" {
+		if r.streamedToolCalls == nil {
+			r.streamedToolCalls = map[string]bool{}
+		}
+		r.streamedToolCalls[id] = true
+	}
+	fmt.Printf("\r\033[2K%s", formatToolNotice(name, args))
+	r.toolProgressOpen = true
+	r.inContent = false
 }
 
 func (r *Renderer) tool(name, args string) {
@@ -89,10 +119,19 @@ func (r *Renderer) closeReasoning(withNewline bool) {
 }
 
 func (r *Renderer) newlineIfOpen() {
+	r.closeToolProgress()
 	if r.lineOpen {
 		fmt.Println()
 		r.lineOpen = false
 	}
+}
+
+func (r *Renderer) closeToolProgress() {
+	if !r.toolProgressOpen {
+		return
+	}
+	fmt.Println()
+	r.toolProgressOpen = false
 }
 
 func (r *Renderer) print(s string) {
@@ -118,4 +157,13 @@ func summarizeArgs(args string) string {
 		return p
 	}
 	return args
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
