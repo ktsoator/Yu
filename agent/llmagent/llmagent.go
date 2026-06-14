@@ -31,6 +31,7 @@ type llmAgent struct {
 	model       llm.Model
 	registry    *tool.Registry
 	toolDefs    []llm.ToolDef
+	approve     agent.ToolApprover
 }
 
 func New(cfg agent.Config) (agent.Agent, error) {
@@ -55,6 +56,7 @@ func New(cfg agent.Config) (agent.Agent, error) {
 		model:       cfg.Model,
 		registry:    registry,
 		toolDefs:    toolDefs(cfg.Tools),
+		approve:     cfg.Approve,
 	}, nil
 }
 
@@ -115,11 +117,22 @@ func (a *llmAgent) run(ctx context.Context, ictx *agent.InvocationContext, emit 
 }
 
 // execTool executes a single tool call. Tool errors are returned as text so
-// the model can see and recover from them.
+// the model can see and recover from them. Non-read-only tools are gated by the
+// approver first, and a rejection is likewise returned as text so the model can
+// adapt rather than the whole turn aborting.
 func (a *llmAgent) execTool(ctx context.Context, ictx *agent.InvocationContext, tc llm.ToolCall) string {
 	t, ok := a.registry.Get(tc.Name)
 	if !ok {
 		return fmt.Sprintf("error: unknown tool %q", tc.Name)
+	}
+	if !t.ReadOnly() && a.approve != nil {
+		ok, err := a.approve(t, tc.Arguments)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		if !ok {
+			return "error: user rejected this tool call"
+		}
 	}
 	toolCtx := toolContext(ctx, ictx)
 	result, err := t.Execute(toolCtx, json.RawMessage(tc.Arguments))

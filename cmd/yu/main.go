@@ -80,13 +80,15 @@ func run(ctx context.Context) error {
 		fstool.NewListDir(),
 		fstool.NewGrep(),
 		fstool.NewGlob(),
+		fstool.NewWriteFile(),
 	}
 	ag, err := llmagent.New(agent.Config{
 		Name:        appName,
 		Model:       model,
 		Description: "A concise coding assistant in a terminal.",
-		Instruction: "You are a coding assistant in a terminal. Be concise. Use the available tools to read files and explore the project when it helps answer the user.",
+		Instruction: "You are a coding assistant in a terminal. Be concise. Use the available tools to read, search, and modify files when it helps answer the user.",
 		Tools:       tools,
+		Approve:     confirmTool(scanner),
 	})
 	if err != nil {
 		return err

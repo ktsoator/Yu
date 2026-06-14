@@ -9,6 +9,12 @@ import (
 	"github.com/ktsoator/yu/tool"
 )
 
+// ToolApprover decides whether a tool call may run. It is consulted only for
+// non-read-only tools before execution; returning false rejects the call and
+// the rejection is fed back to the model as that tool's result. A nil approver
+// means every tool runs unattended.
+type ToolApprover func(t tool.Tool, args string) (bool, error)
+
 // Config describes an agent: what model it uses, how it should behave, and
 // which tools it may call. Session handling lives in the runner, not here.
 type Config struct {
@@ -17,6 +23,9 @@ type Config struct {
 	Instruction string
 	Model       llm.Model
 	Tools       []tool.Tool
+	// Approve gates non-read-only tool calls. Leave nil to run every tool
+	// without asking (e.g. tests or non-interactive use).
+	Approve ToolApprover
 }
 
 // InvocationContext carries everything an agent needs for one invocation:

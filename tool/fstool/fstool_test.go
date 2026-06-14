@@ -98,3 +98,28 @@ func TestGrepNoMatches(t *testing.T) {
 		t.Fatalf("expected \"no matches\", got %q", out)
 	}
 }
+
+func TestWriteFileWithinWorkDir(t *testing.T) {
+	dir := t.TempDir()
+
+	if _, err := writeFile(tool.Context{WorkDir: dir}, writeFileArgs{Path: "sub/a.txt", Content: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "sub", "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("content = %q, want %q", got, "hello")
+	}
+}
+
+func TestWriteFileRejectsEscape(t *testing.T) {
+	dir := t.TempDir()
+	for _, p := range []string{"../escape.txt", "/etc/passwd", "sub/../../escape.txt"} {
+		if _, err := writeFile(tool.Context{WorkDir: dir}, writeFileArgs{Path: p, Content: "x"}); err == nil {
+			t.Fatalf("expected rejection for path %q outside the work dir", p)
+		}
+	}
+}

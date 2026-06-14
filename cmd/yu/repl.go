@@ -17,7 +17,27 @@ import (
 	"github.com/ktsoator/yu/render/clirender"
 	"github.com/ktsoator/yu/runner"
 	"github.com/ktsoator/yu/session"
+	"github.com/ktsoator/yu/tool"
 )
+
+// confirmTool returns an approver that asks the user to allow each non-read-only
+// tool call. It shares the REPL's scanner: a turn is driven synchronously, so
+// reading the answer here never races with the main input loop.
+func confirmTool(scanner *bufio.Scanner) agent.ToolApprover {
+	return func(t tool.Tool, args string) (bool, error) {
+		fmt.Printf("\n\033[33m⚠ tool %q wants to run\033[0m\n  %s\n  args: %s\nAllow? [y/N] ",
+			t.Name(), t.Description(), truncate(args, 200))
+		if !scanner.Scan() {
+			return false, nil
+		}
+		switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+		case "y", "yes":
+			return true, nil
+		default:
+			return false, nil
+		}
+	}
+}
 
 type repl struct {
 	ctx              context.Context
