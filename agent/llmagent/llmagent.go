@@ -32,6 +32,7 @@ type llmAgent struct {
 	registry    *tool.Registry
 	toolDefs    []llm.ToolDef
 	approve     agent.ToolApprover
+	env         agent.Environment
 }
 
 func New(cfg agent.Config) (agent.Agent, error) {
@@ -57,6 +58,7 @@ func New(cfg agent.Config) (agent.Agent, error) {
 		registry:    registry,
 		toolDefs:    toolDefs(cfg.Tools),
 		approve:     cfg.Approve,
+		env:         cfg.Environment,
 	}, nil
 }
 
@@ -80,7 +82,7 @@ func (a *llmAgent) run(ctx context.Context, ictx *agent.InvocationContext, emit 
 	if ictx == nil || ictx.Session == nil {
 		return fmt.Errorf("invocation context with session is required")
 	}
-	messages := toLLMMessages(a.instruction, ictx.Session.Events)
+	messages := toLLMMessages(a.systemPrompt(), ictx.Session.Events)
 
 	for range maxToolIterations {
 		reply, err := a.model.Chat(ctx, messages, a.toolDefs, func(ev llm.Event) bool {
@@ -114,6 +116,21 @@ func (a *llmAgent) run(ctx context.Context, ictx *agent.InvocationContext, emit 
 	}
 
 	return fmt.Errorf("tool loop exceeded %d iterations", maxToolIterations)
+}
+
+// systemPrompt composes the static instruction with the dynamic environment
+// block, evaluated once per invocation. The working directory matches the one
+// tools see, so the model and its tools agree on where they are.
+func (a *llmAgent) systemPrompt() string {
+	if a.env == nil {
+		return a.instruction
+	}
+	wd, _ := os.Getwd()
+	block := a.env(wd)
+	if block == "" {
+		return a.instruction
+	}
+	return a.instruction + "\n\n" + block
 }
 
 // execTool executes a single tool call. Tool errors are returned as text so

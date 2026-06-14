@@ -89,9 +89,10 @@ func run(ctx context.Context) error {
 		Name:        appName,
 		Model:       model,
 		Description: "A concise coding assistant in a terminal.",
-		Instruction: "You are a coding assistant in a terminal. Be concise. Use the available tools to read, search, modify files, and run shell commands when it helps answer the user.",
+		Instruction: systemInstruction,
 		Tools:       tools,
 		Approve:     confirmTool(scanner),
+		Environment: defaultEnvironment,
 	})
 	if err != nil {
 		return err
