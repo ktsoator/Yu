@@ -123,3 +123,66 @@ func TestWriteFileRejectsEscape(t *testing.T) {
 		}
 	}
 }
+
+func TestEditFileReplacesUnique(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, "a.go", "package x\n\nfunc foo() {}\n")
+
+	if _, err := editFile(tool.Context{WorkDir: dir}, editFileArgs{
+		Path: "a.go", OldString: "foo", NewString: "bar",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _ := os.ReadFile(filepath.Join(dir, "a.go"))
+	if !strings.Contains(string(got), "func bar()") {
+		t.Fatalf("edit not applied: %s", got)
+	}
+}
+
+func TestEditFileReplaceAll(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, "a.txt", "x x x")
+
+	out, err := editFile(tool.Context{WorkDir: dir}, editFileArgs{
+		Path: "a.txt", OldString: "x", NewString: "y", ReplaceAll: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "a.txt"))
+	if string(got) != "y y y" {
+		t.Fatalf("got %q, want %q", got, "y y y")
+	}
+	if !strings.Contains(out, "3 occurrence") {
+		t.Fatalf("summary = %q, want 3 occurrences", out)
+	}
+}
+
+func TestEditFileAmbiguousWithoutReplaceAll(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, "a.txt", "x x")
+
+	if _, err := editFile(tool.Context{WorkDir: dir}, editFileArgs{
+		Path: "a.txt", OldString: "x", NewString: "y",
+	}); err == nil {
+		t.Fatal("expected error for non-unique old_string")
+	}
+}
+
+func TestEditFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeTemp(t, dir, "a.txt", "hello")
+
+	cases := map[string]editFileArgs{
+		"not found":    {Path: "a.txt", OldString: "absent", NewString: "y"},
+		"no change":    {Path: "a.txt", OldString: "hello", NewString: "hello"},
+		"missing file": {Path: "nope.txt", OldString: "a", NewString: "b"},
+		"empty old":    {Path: "a.txt", OldString: "", NewString: "b"},
+	}
+	for name, args := range cases {
+		if _, err := editFile(tool.Context{WorkDir: dir}, args); err == nil {
+			t.Fatalf("%s: expected an error", name)
+		}
+	}
+}
